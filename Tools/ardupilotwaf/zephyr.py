@@ -122,16 +122,25 @@ def configure(cfg):
     env.CMAKE_PROJECT_NAME   = 'ardupilot-zephyr'
     env.Zephyr_DIR           = os.path.join(ardupilot_root, 'modules/zephyr/share/zephyr-package/cmake')
     _workspace_root = os.path.dirname(ardupilot_root)
-    _candidates = [
-        os.environ.get('ZEPHYR_MODULES', ''),
-        os.path.join(ardupilot_root, 'modules/modules'),
-        os.path.join(_workspace_root, 'modules/modules'),
-    ]
-    env.ZEPHYR_MODULES = ''
-    for _c in _candidates:
-        if _c and os.path.isdir(_c):
-            env.ZEPHYR_MODULES = _c
-            break
+
+    _env_modules = os.environ.get('ZEPHYR_MODULES', '')
+    if _env_modules:
+        env.ZEPHYR_MODULES = _env_modules
+    else:
+        _module_parents = [
+            os.path.join(ardupilot_root, 'modules/modules'),
+            os.path.join(_workspace_root, 'modules/modules'),
+        ]
+        _module_roots = []
+        for _parent in _module_parents:
+            if not os.path.isdir(_parent):
+                continue
+            for _yml in glob.glob(os.path.join(_parent, '**', 'zephyr', 'module.yml'),
+                                  recursive=True):
+                _root = os.path.dirname(os.path.dirname(_yml))
+                if _root not in _module_roots:
+                    _module_roots.append(_root)
+        env.ZEPHYR_MODULES = ';'.join(_module_roots)
     _module_yml = os.path.join(env.ZEPHYR_BOARD_HAL_DIR, 'zephyr', 'module.yml')
     env.ZEPHYR_EXTRA_MODULES = env.ZEPHYR_BOARD_HAL_DIR if os.path.exists(_module_yml) else ''
 

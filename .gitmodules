@@ -49,3 +49,6 @@
 [submodule "modules/zephyr"]
 	path = modules/zephyr
 	url = https://github.com/zephyrproject-rtos/zephyr.git
+[submodule "modules/modules/fatfs"]
+	path = modules/modules/fs/fatfs
+	url = https://github.com/zephyrproject-rtos/fatfs.git
