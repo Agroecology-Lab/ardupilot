@@ -23,6 +23,8 @@
 
 		ardupilot-pwm0 = &fabric_servo_pwm;
 
+		ardupilot-esc-enable = &esc_enable_pin;
+
 		sdhc0 = &sdhc_spi;
 
 		/* To enable SBUS RC input: drop one serial alias and add
@@ -36,6 +38,14 @@
 		reg = <0x41000000 0x20>;
 		#pwm-cells = <2>;
 		status = "okay";
+	};
+
+	esc_enable_keys: esc-enable-keys {
+		compatible = "gpio-keys";
+		esc_enable_pin: esc_enable_pin {
+			gpios = <&gpio2 18 GPIO_ACTIVE_HIGH>;
+			label = "ESC_ENABLE";
+		};
 	};
 };
 

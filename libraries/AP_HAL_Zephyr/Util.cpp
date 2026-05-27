@@ -4,6 +4,7 @@
 
 #include <zephyr/kernel.h>
 
+#include <AP_HAL_Zephyr/RCOutput.h>
 #include <AP_HAL_Zephyr/Scheduler.h>
 
 using namespace Zephyr;
@@ -34,4 +35,13 @@ uint32_t Util::available_memory()
         return (uint32_t)mi.fordblks;
     }
     return CONFIG_HEAP_MEM_POOL_SIZE;
+}
+
+AP_HAL::Util::safety_state Util::safety_switch_state(void)
+{
+    auto *rcout = static_cast<Zephyr::RCOutput *>(AP_HAL::get_HAL().rcout);
+    if (rcout == nullptr) {
+        return SAFETY_NONE;
+    }
+    return rcout->safety_state();
 }

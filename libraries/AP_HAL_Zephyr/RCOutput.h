@@ -24,6 +24,10 @@ public:
     void cork() override;
     void push() override;
 
+    bool force_safety_on(void) override;
+    void force_safety_off(void) override;
+    AP_HAL::Util::safety_state safety_state(void) const { return _safety_state; }
+
 private:
     std::array<uint16_t, 16> _values;
     std::array<bool, 16>     _enabled;
@@ -38,5 +42,9 @@ private:
     const struct device *_pwm_dev;
     bool _has_pwm;
 
+    AP_HAL::Util::safety_state _safety_state;
+    bool _has_esc_enable;
+
+    /* Apply a single channel to hardware (no-op when _has_pwm is false) */
     void _apply(uint8_t ch);
 };

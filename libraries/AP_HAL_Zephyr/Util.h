@@ -9,6 +9,7 @@ public:
     uint64_t get_hw_rtc() const override;
     void commandline_arguments(uint8_t &argc, char *const *&argv) override;
     uint32_t available_memory() override;
+    enum safety_state safety_switch_state(void) override;
 
 private:
     uint64_t _rtc_offset_us = 0;

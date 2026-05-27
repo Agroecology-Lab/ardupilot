@@ -9,6 +9,16 @@
 #include <zephyr/drivers/pwm.h>
 #endif
 
+#include <zephyr/drivers/gpio.h>
+
+#if DT_HAS_ALIAS(ardupilot_esc_enable)
+static const struct gpio_dt_spec esc_enable_spec =
+    GPIO_DT_SPEC_GET(DT_ALIAS(ardupilot_esc_enable), gpios);
+#define HAS_ESC_ENABLE_ALIAS 1
+#else
+#define HAS_ESC_ENABLE_ALIAS 0
+#endif
+
 using namespace Zephyr;
 
 static constexpr uint16_t DEFAULT_FREQ_HZ  = 50u;
@@ -25,6 +35,8 @@ RCOutput::RCOutput()
     , _pending_mask(0u)
     , _pwm_dev(nullptr)
     , _has_pwm(false)
+    , _safety_state(AP_HAL::Util::SAFETY_DISARMED)
+    , _has_esc_enable(false)
 {
 }
 
@@ -34,6 +46,14 @@ void RCOutput::init()
     _enabled.fill(false);
     _corked       = false;
     _pending_mask = 0u;
+    _safety_state = AP_HAL::Util::SAFETY_DISARMED;
+
+#if HAS_ESC_ENABLE_ALIAS
+    _has_esc_enable = device_is_ready(esc_enable_spec.port);
+    if (_has_esc_enable) {
+        gpio_pin_configure_dt(&esc_enable_spec, GPIO_OUTPUT_INACTIVE);
+    }
+#endif
 
 #ifdef CONFIG_PWM
 #if DT_HAS_ALIAS(ardupilot_pwm0) && DT_NODE_HAS_STATUS(DT_ALIAS(ardupilot_pwm0), okay)
@@ -50,7 +70,8 @@ void RCOutput::_apply(uint8_t ch)
     if (!_has_pwm || ch >= NUM_CHANNELS) {
         return;
     }
-    const uint32_t pulse_ns = _enabled[ch]
+    const bool armed = (_safety_state == AP_HAL::Util::SAFETY_ARMED);
+    const uint32_t pulse_ns = (armed && _enabled[ch])
                               ? static_cast<uint32_t>(_values[ch]) * NS_PER_US
                               : 0u;
     pwm_set(_pwm_dev, ch, _period_ns, pulse_ns, PWM_POLARITY_NORMAL);
@@ -142,6 +163,40 @@ void RCOutput::push()
         if (mask & (1u << ch)) {
             _apply(ch);
             mask &= ~(1u << ch);
+        }
+    }
+}
+
+bool RCOutput::force_safety_on(void)
+{
+    _safety_state = AP_HAL::Util::SAFETY_DISARMED;
+
+    for (uint8_t ch = 0u; ch < NUM_CHANNELS; ch++) {
+        _apply(ch);
+    }
+
+#if HAS_ESC_ENABLE_ALIAS
+    if (_has_esc_enable) {
+        gpio_pin_set_dt(&esc_enable_spec, 0);
+        return true;
+    }
+#endif
+    return false;
+}
+
+void RCOutput::force_safety_off(void)
+{
+    _safety_state = AP_HAL::Util::SAFETY_ARMED;
+
+#if HAS_ESC_ENABLE_ALIAS
+    if (_has_esc_enable) {
+        gpio_pin_set_dt(&esc_enable_spec, 1);
+    }
+#endif
+
+    for (uint8_t ch = 0u; ch < NUM_CHANNELS; ch++) {
+        if (_enabled[ch]) {
+            _apply(ch);
         }
     }
 }

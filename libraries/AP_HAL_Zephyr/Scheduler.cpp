@@ -1,6 +1,7 @@
 #include "Scheduler.h"
 #include "PeriodicCallback.h"
 
+#include <zephyr/drivers/gpio.h>
 #include <zephyr/sys/printk.h>
 #include <zephyr/devicetree.h>
 
@@ -168,15 +169,16 @@ void Scheduler::reboot(bool hold_in_bootloader)
 {
     (void)(hold_in_bootloader);
 
-    // no clean reboot path on MPFS AMP with skip-opensbi=true (no SBI,
-    // MSS_RESET_CR takes Linux with us, __reset leaves peripherals mid-transaction).
-    // Spin and let the user power-cycle.
-    printk("AP_HAL_Zephyr: reboot not supported on this config; power-cycle required\n");
-    irq_lock();
-
-    for (;;) {
-        __asm__ __volatile__("" ::: "memory");
+#if DT_HAS_ALIAS(ardupilot_esc_enable)
+    static const struct gpio_dt_spec esc =
+        GPIO_DT_SPEC_GET(DT_ALIAS(ardupilot_esc_enable), gpios);
+    if (device_is_ready(esc.port)) {
+        gpio_pin_configure_dt(&esc, GPIO_OUTPUT_INACTIVE);
     }
+#endif
+
+    sys_reboot(SYS_REBOOT_COLD);
+    for (;;) {}
 }
 
 bool Scheduler::in_main_thread() const
@@ -208,8 +210,6 @@ bool Scheduler::thread_create(AP_HAL::MemberProc proc, const char *name,
                         nullptr, nullptr,
                         _zephyr_priority(base, priority), 0, K_NO_WAIT);
         k_thread_name_set(&_user_threads[i].thread_data, name);
-        printk("AP_HAL_Zephyr: thread '%s' created (slot=%u prio=%d)\n",
-               name, (unsigned)i, _zephyr_priority(base, priority));
         return true;
     }
 
@@ -292,11 +292,7 @@ int Scheduler::_zephyr_priority(priority_base base, int8_t offset)
     case PRIORITY_I2C:       base_prio = 7;  break;
     case PRIORITY_MAIN:      base_prio = 8;  break;
     case PRIORITY_UART:      base_prio = 9;  break;
-    // PRIORITY_IO raised above MAIN: at prio 10 the compasscal/FTP/logger
-    // threads never got dispatched with our 1 kHz timers + 400 Hz fast-loop.
-    // This inverts the usual "IO below MAIN" but it's the only way to get
-    // prio-10 user threads to run on this platform.
-    case PRIORITY_IO:        base_prio = 7;  break;
+    case PRIORITY_IO:        base_prio = 7; break;
     case PRIORITY_STORAGE:   base_prio = 12; break;
     case PRIORITY_SCRIPTING: base_prio = 13; break;
     case PRIORITY_NET:       base_prio = 13; break;
