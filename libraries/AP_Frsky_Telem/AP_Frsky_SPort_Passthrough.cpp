@@ -246,7 +246,7 @@ bool AP_Frsky_SPort_Passthrough::is_packet_ready(uint8_t idx, bool queue_empty)
     {
         float a;
         WITH_SEMAPHORE(AP::ahrs().get_semaphore());
-        if (AP::ahrs().airspeed_estimate_true(a)) {
+        if (AP::ahrs().airspeed_TAS(a)) {
             // if we have an airspeed estimate then we have a valid wind estimate
             packet_ready = true;
         }
@@ -508,11 +508,11 @@ uint32_t AP_Frsky_SPort_Passthrough::calc_gps_status(void)
     // number of GPS satellites visible (limit to 15 (0xF) since the value is stored on 4 bits)
     uint32_t gps_status = (gps.num_sats() < GPS_SATS_LIMIT) ? gps.num_sats() : GPS_SATS_LIMIT;
     // GPS receiver status (limit to 0-3 (0x3) since the value is stored on 2 bits: NO_GPS = 0, NO_FIX = 1, GPS_OK_FIX_2D = 2, GPS_OK_FIX_3D or GPS_OK_FIX_3D_DGPS or GPS_OK_FIX_3D_RTK_FLOAT or GPS_OK_FIX_3D_RTK_FIXED = 3)
-    gps_status |= ((gps.status() < GPS_STATUS_LIMIT) ? gps.status() : GPS_STATUS_LIMIT)<<GPS_STATUS_OFFSET;
+    gps_status |= (((uint8_t)gps.status() < GPS_STATUS_LIMIT) ? (uint8_t)gps.status() : GPS_STATUS_LIMIT)<<GPS_STATUS_OFFSET;
     // GPS horizontal dilution of precision in dm
     gps_status |= prep_number(roundf(gps.get_hdop() * 0.1f),2,1)<<GPS_HDOP_OFFSET;
     // GPS receiver advanced status (0: no advanced fix, 1: GPS_OK_FIX_3D_DGPS, 2: GPS_OK_FIX_3D_RTK_FLOAT, 3: GPS_OK_FIX_3D_RTK_FIXED)
-    gps_status |= ((gps.status() > GPS_STATUS_LIMIT) ? gps.status()-GPS_STATUS_LIMIT : 0)<<GPS_ADVSTATUS_OFFSET;
+    gps_status |= (((uint8_t)gps.status() > GPS_STATUS_LIMIT) ? (uint8_t)gps.status()-GPS_STATUS_LIMIT : 0)<<GPS_ADVSTATUS_OFFSET;
     // Altitude MSL in dm
     const Location &loc = gps.location();
     gps_status |= prep_number(roundf(loc.alt * 0.1f),2,2)<<GPS_ALTMSL_OFFSET;
@@ -655,7 +655,7 @@ uint32_t AP_Frsky_SPort_Passthrough::calc_velandyaw(void)
     {
         WITH_SEMAPHORE(_ahrs.get_semaphore());
         hspeed_m = _ahrs.groundspeed(); // default is to use groundspeed
-        airspeed_estimate_true = AP::ahrs().airspeed_estimate_true(airspeed_m);
+        airspeed_estimate_true = AP::ahrs().airspeed_TAS(airspeed_m);
     }
     bool option_airspeed_enabled = (_frsky_parameters->_options & frsky_options_e::OPTION_AIRSPEED_AND_GROUNDSPEED) != 0;
     // airspeed estimate + airspeed option disabled (default) => send airspeed (we give priority to airspeed over groundspeed)

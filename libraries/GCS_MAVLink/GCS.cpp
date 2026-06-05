@@ -340,7 +340,7 @@ void GCS::send_named_float(const char *name, float value) const
 // @Field: TimeUS: Time since system startup
 // @Field: Name: Name of float
 // @Field: Value: Value of float
-    AP::logger().WriteStreaming(
+    AP::logger().Write(
         "NVF",
         "TimeUS," "Name," "Value",
         "s"       "#"     "-",
@@ -468,7 +468,7 @@ void GCS::update_sensor_status_flags()
 
 #if AP_GPS_ENABLED
     const AP_GPS &gps = AP::gps();
-    if (gps.status() > AP_GPS::NO_GPS) {
+    if (gps.status() > AP_GPS_FixType::NO_GPS) {
         control_sensors_present |= MAV_SYS_STATUS_SENSOR_GPS;
         control_sensors_enabled |= MAV_SYS_STATUS_SENSOR_GPS;
     }
@@ -535,7 +535,7 @@ void GCS::update_sensor_status_flags()
 #endif
 
 #if CONFIG_HAL_BOARD == HAL_BOARD_SITL && AP_AHRS_ENABLED
-    if (ahrs.get_ekf_type() == 10) {
+    if (ahrs.configured_ekf_type() == AP_AHRS::EKFType::SIM) {
         // always show EKF type 10 as healthy. This prevents spurious error
         // messages in xplane and other simulators that use EKF type 10
         control_sensors_health |= MAV_SYS_STATUS_AHRS | MAV_SYS_STATUS_SENSOR_GPS | MAV_SYS_STATUS_SENSOR_3D_ACCEL | MAV_SYS_STATUS_SENSOR_3D_GYRO;

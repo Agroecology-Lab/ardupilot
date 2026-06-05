@@ -7,9 +7,9 @@ AP_FLAKE8_CLEAN
 '''
 
 import argparse
+import os
 import shlex
 import sys
-import os
 
 sys.path.append(os.path.join(os.path.dirname(os.path.realpath(__file__)), '../../../../libraries/AP_HAL/hwdef/scripts'))
 import hwdef  # noqa:E402
@@ -17,8 +17,8 @@ import hwdef  # noqa:E402
 
 class LinuxHWDef(hwdef.HWDef):
 
-    def __init__(self, quiet=False, outdir=None, hwdef=[]):
-        super(LinuxHWDef, self).__init__(quiet=quiet, outdir=outdir, hwdef=hwdef)
+    def __init__(self, **kwargs):
+        super(LinuxHWDef, self).__init__(**kwargs)
         # a list of LINUX_SPIDEV devices
         self.linux_spidev = []
 

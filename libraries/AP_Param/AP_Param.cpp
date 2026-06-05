@@ -45,7 +45,7 @@
 
 extern const AP_HAL::HAL &hal;
 
-uint16_t AP_Param::sentinal_offset;
+uint16_t AP_Param::sentinel_offset;
 
 // singleton instance
 AP_Param *AP_Param::_singleton;
@@ -161,19 +161,19 @@ void AP_Param::eeprom_write_check(const void *ptr, uint16_t ofs, uint8_t size)
 
 bool AP_Param::_hide_disabled_groups = true;
 
-// write a sentinal value at the given offset
-void AP_Param::write_sentinal(uint16_t ofs)
+// write a sentinel value at the given offset
+void AP_Param::write_sentinel(uint16_t ofs)
 {
     struct Param_header phdr;
-    phdr.type = _sentinal_type;
-    set_key(phdr, _sentinal_key);
-    phdr.group_element = _sentinal_group;
+    phdr.type = _sentinel_type;
+    set_key(phdr, _sentinel_key);
+    phdr.group_element = _sentinel_group;
     eeprom_write_check(&phdr, ofs, sizeof(phdr));
-    sentinal_offset = ofs;
+    sentinel_offset = ofs;
 }
 
 // erase all EEPROM variables by re-writing the header and adding
-// a sentinal
+// a sentinel
 void AP_Param::erase_all(void)
 {
     struct EEPROM_header hdr;
@@ -185,8 +185,8 @@ void AP_Param::erase_all(void)
     hdr.spare    = 0;
     eeprom_write_check(&hdr, 0, sizeof(hdr));
 
-    // add a sentinal directly after the header
-    write_sentinal(sizeof(struct EEPROM_header));
+    // add a sentinel directly after the header
+    write_sentinel(sizeof(struct EEPROM_header));
 }
 
 /* the 'group_id' of a element of a group is the 18 bit identifier
@@ -383,7 +383,7 @@ bool AP_Param::setup(void)
         }
 #endif // AP_PARAM_STORAGE_BAK_ENABLED
         // header doesn't match. We can't recover any variables. Wipe
-        // the header and setup the sentinal directly after the header
+        // the header and setup the sentinel directly after the header
         Debug("bad header in setup - erasing");
         erase_all();
     }
@@ -734,15 +734,15 @@ void AP_Param::set_key(Param_header &phdr, uint16_t key)
 }
 
 /*
-  return true if a header is the end of eeprom sentinal
+  return true if a header is the end of eeprom sentinel
  */
-bool AP_Param::is_sentinal(const Param_header &phdr)
+bool AP_Param::is_sentinel(const Param_header &phdr)
 {
     // note that this is an ||, not an && on the key and group, as
     // this makes us more robust to power off while adding a variable
     // to EEPROM
-    if (phdr.type == _sentinal_type ||
-        get_key(phdr) == _sentinal_key) {
+    if (phdr.type == _sentinel_type ||
+        get_key(phdr) == _sentinel_key) {
         return true;
     }
     // also check for 0xFFFFFFFF and 0x00000000, which are the fill
@@ -758,8 +758,8 @@ bool AP_Param::is_sentinal(const Param_header &phdr)
 // scan the EEPROM looking for a given variable by header content
 // return true if found, along with the offset in the EEPROM where
 // the variable is stored
-// if not found return the offset of the sentinal
-// if the sentinal isn't found either, the offset is set to 0xFFFF
+// if not found return the offset of the sentinel
+// if the sentinel isn't found either, the offset is set to 0xFFFF
 bool AP_Param::scan(const AP_Param::Param_header *target, uint16_t *pofs)
 {
     struct Param_header phdr;
@@ -773,10 +773,10 @@ bool AP_Param::scan(const AP_Param::Param_header *target, uint16_t *pofs)
             *pofs = ofs;
             return true;
         }
-        if (is_sentinal(phdr)) {
-            // we've reached the sentinal
+        if (is_sentinel(phdr)) {
+            // we've reached the sentinel
             *pofs = ofs;
-            sentinal_offset = ofs;
+            sentinel_offset = ofs;
             return false;
         }
         ofs += type_size((enum ap_var_type)phdr.type) + sizeof(phdr);
@@ -1093,7 +1093,7 @@ bool AP_Param::find_top_level_key_by_pointer(const void *ptr, uint16_t &key)
   is used to find the old value of a parameter that has been
   removed from an object.
 */
-bool AP_Param::get_param_by_index(void *obj_ptr, uint8_t idx, ap_var_type old_ptype, void *pvalue)
+bool AP_Param::get_param_by_index(void *obj_ptr, uint32_t idx, ap_var_type old_ptype, void *pvalue)
 {
     uint16_t key;
     if (!find_top_level_key_by_pointer(obj_ptr, key)) {
@@ -1103,24 +1103,6 @@ bool AP_Param::get_param_by_index(void *obj_ptr, uint8_t idx, ap_var_type old_pt
     return AP_Param::find_old_parameter(&type_info, (AP_Param *)pvalue);
 }
 
-
-// Find a object by name.
-//
-AP_Param *
-AP_Param::find_object(const char *name)
-{
-    for (uint16_t i=0; i<_num_vars; i++) {
-        const auto &info = var_info(i);
-        if (strcasecmp(name, info.name) == 0) {
-            ptrdiff_t base;
-            if (!get_base(info, base)) {
-                return nullptr;
-            }
-            return (AP_Param *)base;
-        }
-    }
-    return nullptr;
-}
 
 // notify GCS of current value of parameter
 void AP_Param::notify() const {
@@ -1250,8 +1232,8 @@ void AP_Param::save_sync(bool force_save, bool send_to_gcs)
         return;
     }
 
-    // write a new sentinal, then the data, then the header
-    write_sentinal(ofs + sizeof(phdr) + type_size((enum ap_var_type)phdr.type));
+    // write a new sentinel, then the data, then the header
+    write_sentinel(ofs + sizeof(phdr) + type_size((enum ap_var_type)phdr.type));
     eeprom_write_check(ap, ofs+sizeof(phdr), type_size((enum ap_var_type)phdr.type));
     eeprom_write_check(&phdr, ofs, sizeof(phdr));
 
@@ -1587,9 +1569,9 @@ bool AP_Param::load_all()
     
     while (ofs < _storage.size()) {
         _storage.read_block(&phdr, ofs, sizeof(phdr));
-        if (is_sentinal(phdr)) {
-            // we've reached the sentinal
-            sentinal_offset = ofs;
+        if (is_sentinel(phdr)) {
+            // we've reached the sentinel
+            sentinel_offset = ofs;
             return true;
         }
 
@@ -1604,8 +1586,8 @@ bool AP_Param::load_all()
         ofs += type_size((enum ap_var_type)phdr.type) + sizeof(phdr);
     }
 
-    // we didn't find the sentinal
-    Debug("no sentinal in load_all");
+    // we didn't find the sentinel
+    Debug("no sentinel in load_all");
     return false;
 }
 
@@ -1716,9 +1698,9 @@ void AP_Param::load_object_from_eeprom(const void *object_pointer, const struct 
             _storage.read_block(&phdr, ofs, sizeof(phdr));
             // note that this is an || not an && for robustness
             // against power off while adding a variable
-            if (is_sentinal(phdr)) {
-                // we've reached the sentinal
-                sentinal_offset = ofs;
+            if (is_sentinel(phdr)) {
+                // we've reached the sentinel
+                sentinel_offset = ofs;
                 break;
             }
             if (get_key(phdr) == key) {
@@ -2478,6 +2460,10 @@ bool AP_Param::load_defaults_file(const char *filename, bool last_pass)
 
     num_param_overrides = num_defaults;
 
+#if AP_PARAM_DEFAULTS_ENABLED
+    purge_defaults_list_overrides();
+#endif
+
     return true;
 }
 #endif // AP_PARAM_DEFAULTS_FILE_PARSING_ENABLED
@@ -2607,6 +2593,10 @@ void AP_Param::load_param_defaults(const volatile char *ptr, int32_t length, boo
         }
     }
     num_param_overrides = num_defaults;
+
+#if AP_PARAM_DEFAULTS_ENABLED
+    purge_defaults_list_overrides();
+#endif
 }
 #endif // AP_PARAM_MAX_EMBEDDED_PARAM > 0 || defined(HAL_HAVE_AP_ROMFS_EMBEDDED_H)
 
@@ -2918,6 +2908,36 @@ void AP_Param::check_default(AP_Param *ap, float *default_value)
         }
     }
 }
+
+/*
+  Remove default_list entries that are in param_overrides.  Constructors may
+  call add_default() before param_overrides is populated, leaving stale nodes.
+ */
+#if AP_PARAM_DEFAULTS_ENABLED
+void AP_Param::purge_defaults_list_overrides(void)
+{
+    defaults_list **prev = &default_list;
+    defaults_list *item = default_list;
+    while (item != nullptr) {
+        bool found = false;
+        for (uint16_t i = 0; i < num_param_overrides; i++) {
+            if (item->ap == param_overrides[i].object_ptr) {
+                found = true;
+                break;
+            }
+        }
+        if (found) {
+            *prev = item->next;
+            defaults_list *to_delete = item;
+            item = item->next;
+            delete to_delete;
+        } else {
+            prev = &item->next;
+            item = item->next;
+        }
+    }
+}
+#endif // AP_PARAM_DEFAULTS_ENABLED
 
 void AP_Param::add_default(AP_Param *ap, float v)
 {

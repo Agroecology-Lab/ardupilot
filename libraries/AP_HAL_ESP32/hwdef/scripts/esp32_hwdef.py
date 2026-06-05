@@ -7,10 +7,10 @@ AP_FLAKE8_CLEAN
 '''
 
 import argparse
-import shlex
-import re
-import sys
 import os
+import re
+import shlex
+import sys
 
 from dataclasses import dataclass
 
@@ -20,8 +20,8 @@ import hwdef  # noqa:E402
 
 class ESP32HWDef(hwdef.HWDef):
 
-    def __init__(self, quiet=False, outdir=None, hwdef=[]):
-        super(ESP32HWDef, self).__init__(quiet=quiet, outdir=outdir, hwdef=hwdef)
+    def __init__(self, **kwargs):
+        super(ESP32HWDef, self).__init__(**kwargs)
         # lists of ESP32_SPIBUS buses and ESP32_SPIDEV devices
         self.esp32_spibus = []
         self.esp32_spidev = []
@@ -93,10 +93,10 @@ class ESP32HWDef(hwdef.HWDef):
         '''write I2C bus table'''
         buslist = []
         for bus in self.esp32_i2cbus:
-            if len(bus) != 5:
-                self.error(f"Badly formed ESP32_I2CBUS line {bus} {len(bus)=}")
-            (port, sda, scl, speed, internal) = bus
-            buslist.append(f"{{ .port={port}, .sda={sda}, .scl={scl}, .speed={speed}, .internal={internal} }}")
+            if len(bus) != 6:
+                self.error(f"Badly formed ESP32_I2CBUS line {bus} {len(bus)=} want=6")
+            (port, sda, scl, speed, internal, soft) = bus
+            buslist.append(f"{{ .port={port}, .sda={sda}, .scl={scl}, .speed={speed}, .internal={internal}, .soft={soft} }}")
 
         self.write_device_table(f, "i2c buses", "HAL_ESP32_I2C_BUSES", buslist)
 

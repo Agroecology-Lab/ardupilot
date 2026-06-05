@@ -168,7 +168,7 @@ const AP_Param::GroupInfo AP_Follow::var_info[] = {
     // @Range: 0 5
     // @Units: m/s/s
     // @User: Advanced
-    AP_GROUPINFO("_ACCEL_NE", 12, AP_Follow, _accel_max_ne_mss, 2.5),
+    AP_GROUPINFO("_ACCEL_NE", 12, AP_Follow, _accel_max_ne_mss, 5.0),
 
     // @Param: _JERK_NE
     // @DisplayName: Jerk limit for the horizontal kinematic input shaping
@@ -176,7 +176,7 @@ const AP_Param::GroupInfo AP_Follow::var_info[] = {
     // @Range: 0 20
     // @Units: m/s/s/s
     // @User: Advanced
-    AP_GROUPINFO("_JERK_NE", 13, AP_Follow, _jerk_max_ne_msss, 5.0),
+    AP_GROUPINFO("_JERK_NE", 13, AP_Follow, _jerk_max_ne_msss, 10.0),
 
     // @Param: _ACCEL_D
     // @DisplayName: Acceleration limit for the vertical kinematic input shaping
@@ -184,7 +184,7 @@ const AP_Param::GroupInfo AP_Follow::var_info[] = {
     // @Range: 0 2.5
     // @Units: m/s/s
     // @User: Advanced
-    AP_GROUPINFO("_ACCEL_D", 14, AP_Follow, _accel_max_d_mss, 2.5),
+    AP_GROUPINFO("_ACCEL_D", 14, AP_Follow, _accel_max_d_mss, 5.0),
 
     // @Param: _JERK_D
     // @DisplayName: Jerk limit for the vertical kinematic input shaping
@@ -192,7 +192,7 @@ const AP_Param::GroupInfo AP_Follow::var_info[] = {
     // @Range: 0 5
     // @Units: m/s/s/s
     // @User: Advanced
-    AP_GROUPINFO("_JERK_D", 15, AP_Follow, _jerk_max_d_msss, 5.0),
+    AP_GROUPINFO("_JERK_D", 15, AP_Follow, _jerk_max_d_msss, 10.0),
 
     // @Param: _ACCEL_H
     // @DisplayName: Angular acceleration limit for the heading kinematic input shaping
@@ -200,7 +200,7 @@ const AP_Param::GroupInfo AP_Follow::var_info[] = {
     // @Range: 0 90
     // @Units: deg/s/s
     // @User: Advanced
-    AP_GROUPINFO("_ACCEL_H", 16, AP_Follow, _accel_max_h_degss, 90.0),
+    AP_GROUPINFO("_ACCEL_H", 16, AP_Follow, _accel_max_h_degss, 360.0),
 
     // @Param: _JERK_H
     // @DisplayName: Angular jerk limit for the heading kinematic input shaping
@@ -208,7 +208,7 @@ const AP_Param::GroupInfo AP_Follow::var_info[] = {
     // @Range: 0 360
     // @Units: deg/s/s/s
     // @User: Advanced
-    AP_GROUPINFO("_JERK_H", 17, AP_Follow, _jerk_max_h_degsss, 360.0),
+    AP_GROUPINFO("_JERK_H", 17, AP_Follow, _jerk_max_h_degsss, 720.0),
 
     // @Param: _TIMEOUT
     // @DisplayName: Follow timeout
@@ -272,7 +272,7 @@ void AP_Follow::update_estimates()
         // update X/Y position, velocity, acceleration with shaping
         update_pos_vel_accel_xy(_estimate_pos_ned_m.xy(), _estimate_vel_ned_ms.xy(), _estimate_accel_ned_mss.xy(), e_dt, Vector2f(), Vector2f(), Vector2f());
 
-        // update Z axis position, velocity, acceleration without shaping (direct update)
+        // integrate the Z axis estimate forward by e_dt
         update_pos_vel_accel(_estimate_pos_ned_m.z, _estimate_vel_ned_ms.z, _estimate_accel_ned_mss.z, e_dt, 0.0, 0.0, 0.0);
 
         // apply horizontal shaping to refine estimate toward projected target state
@@ -280,16 +280,22 @@ void AP_Follow::update_estimates()
                                _estimate_pos_ned_m.xy(), _estimate_vel_ned_ms.xy(), _estimate_accel_ned_mss.xy(),
                                0.0, _accel_max_ne_mss, _jerk_max_ne_msss, e_dt, false);
 
+        // apply vertical shaping to refine the Z estimate toward the projected
+        // target state (jerk-limited, tuned via FOLL_ACCEL_D / FOLL_JERK_D)
+        shape_pos_vel_accel(_target_pos_ned_m.z + delta_pos_m.z, _target_vel_ned_ms.z + delta_vel_ms.z, _target_accel_ned_mss.z,
+                            _estimate_pos_ned_m.z, _estimate_vel_ned_ms.z, _estimate_accel_ned_mss.z,
+                            0.0, 0.0, -_accel_max_d_mss, _accel_max_d_mss, _jerk_max_d_msss, e_dt, false);
+
         // apply angular shaping for heading estimate
         shape_angle_vel_accel(radians(_target_heading_deg) + delta_heading_rad, radians(_target_heading_rate_degs), 0.0,
                               _estimate_heading_rad, _estimate_heading_rate_rads, _estimate_heading_accel_radss,
-                              0.0, radians(_accel_max_h_degss),
+                              0.0, 0.0, radians(_accel_max_h_degss),
                               radians(_jerk_max_h_degsss), e_dt, false);
 
         // update heading angle separately to maintain proper wrapping [-PI, PI]
         postype_t estimate_heading_rad = _estimate_heading_rad;
         update_pos_vel_accel(estimate_heading_rad, _estimate_heading_rate_rads, _estimate_heading_accel_radss, e_dt, 0.0, 0.0, 0.0);
-        _estimate_heading_rad = wrap_PI(estimate_heading_rad);
+        _estimate_heading_rad = wrap_PI(float(estimate_heading_rad));
     } else {
         // no valid estimate yet: initialise from latest target position
         _estimate_pos_ned_m = _target_pos_ned_m + delta_pos_m.topostype();
@@ -309,17 +315,25 @@ void AP_Follow::update_estimates()
         _ofs_estimate_vel_ned_ms = _estimate_vel_ned_ms;
         _ofs_estimate_accel_ned_mss = _estimate_accel_ned_mss;
     } else {
-        // offsets are in FRD frame: rotate by heading
+        // offsets are in FRD frame: rotate the FRD offset into NED using the target's heading
         offset_m.xy().rotate(_estimate_heading_rad);
         _ofs_estimate_pos_ned_m = _estimate_pos_ned_m + offset_m.topostype();
+        // seed vel/accel with the target's own translational vel/accel; rotational
+        // contributions from the offset rotating with the target are added below
         _ofs_estimate_vel_ned_ms = _estimate_vel_ned_ms;
         _ofs_estimate_accel_ned_mss = _estimate_accel_ned_mss;
-        // with kinematic shaping of heading we can improve our offset velocity and acceleration of the offset
+        // When heading rate/accel are available (kinematic shaping active), the offset
+        // point is fixed in a frame rotating about the NED down-axis at the target's
+        // heading rate (ω) and heading accel (α), at radius r = offset_m, giving:
+        //   v_rot = ω × r
+        //   a_rot = α × r + ω × (ω × r)   (Euler/tangential term + centripetal term)
+        // These are added on top of the target's translational vel/accel set above.
         if (valid_kinematic_params) {
-            Vector3f offset_cross = offset_m.cross(Vector3f{0.0, 0.0, 1.0});
-            float offset_length_m = offset_m.length();
-            _ofs_estimate_vel_ned_ms += offset_cross * offset_length_m * _estimate_heading_rate_rads;
-            _ofs_estimate_accel_ned_mss += offset_cross * offset_length_m * _estimate_heading_accel_radss;
+            const Vector3f angular_vel{0.0f, 0.0f, _estimate_heading_rate_rads};       // ω: heading rate about NED down-axis
+            const Vector3f angular_accel{0.0f, 0.0f, _estimate_heading_accel_radss};   // α: heading angular acceleration
+            const Vector3f vel_due_to_rotation = angular_vel.cross(offset_m);          // ω × r
+            _ofs_estimate_vel_ned_ms += vel_due_to_rotation;
+            _ofs_estimate_accel_ned_mss += angular_accel.cross(offset_m) + angular_vel.cross(vel_due_to_rotation);  // α × r + ω × (ω × r)
         }
     }
 
@@ -617,23 +631,23 @@ bool AP_Follow::handle_global_position_int_message(const mavlink_message_t &msg)
         return false;
     }
 
-    Location _target_location;
-    _target_location.lat = packet.lat;
-    _target_location.lng = packet.lon;
+    Location target_location;
+    target_location.lat = packet.lat;
+    target_location.lng = packet.lon;
 
     switch((Location::AltFrame)_alt_type) {
         case Location::AltFrame::ABSOLUTE:
-            _target_location.set_alt_cm(packet.alt * 0.1, Location::AltFrame::ABSOLUTE);
+            target_location.set_alt_cm(packet.alt * 0.1, Location::AltFrame::ABSOLUTE);
             break;
         case Location::AltFrame::ABOVE_HOME:
-            _target_location.set_alt_cm(packet.relative_alt * 0.1, Location::AltFrame::ABOVE_HOME);
+            target_location.set_alt_cm(packet.relative_alt * 0.1, Location::AltFrame::ABOVE_HOME);
             break;
 #if APM_BUILD_TYPE(APM_BUILD_ArduPlane) || APM_BUILD_TYPE(APM_BUILD_ArduCopter)
         case Location::AltFrame::ABOVE_TERRAIN:
             /// Altitude comes in as AMSL
-            _target_location.set_alt_cm(packet.alt * 0.1, Location::AltFrame::ABSOLUTE);
+            target_location.set_alt_cm(packet.alt * 0.1, Location::AltFrame::ABSOLUTE);
             // convert the incoming altitude to terrain altitude, but fail if there is no terrain data available
-            if (!_target_location.change_alt_frame(Location::AltFrame::ABOVE_TERRAIN)) {
+            if (!target_location.change_alt_frame(Location::AltFrame::ABOVE_TERRAIN)) {
                 return false;
             };
             break;
@@ -644,19 +658,10 @@ bool AP_Follow::handle_global_position_int_message(const mavlink_message_t &msg)
     }
     
     // convert global location to local NED frame position
-    if (!_target_location.get_vector_from_origin_NEU(_target_pos_ned_m)) {
+    Vector3p target_pos_neu_m;
+    if (!target_location.get_vector_from_origin_NEU_m(target_pos_neu_m)) {
         return false;
     }
-    _target_pos_ned_m.z = -_target_pos_ned_m.z; // convert NEU -> NED
-    _target_pos_ned_m *= 0.01;  // convert from cm to meters
-
-    // decode target velocity components (in m/s)
-    _target_vel_ned_ms.x = packet.vx * 0.01f; // velocity north
-    _target_vel_ned_ms.y = packet.vy * 0.01f; // velocity east
-    _target_vel_ned_ms.z = packet.vz * 0.01f; // velocity down
-
-    // target acceleration not available in GLOBAL_POSITION_INT
-    _target_accel_ned_mss.zero();
 
     if (packet.hdg <= 36000) {
         // valid heading field available (in centi-degrees)
@@ -668,6 +673,17 @@ bool AP_Follow::handle_global_position_int_message(const mavlink_message_t &msg)
         // no heading available: set heading rate to zero
         _target_heading_rate_degs = 0.0f;
     }
+
+    _target_pos_ned_m.xy() = target_pos_neu_m.xy(); 
+    _target_pos_ned_m.z = -target_pos_neu_m.z;
+
+    // decode target velocity components (cm/s converted to m/s)
+    _target_vel_ned_ms.x = packet.vx * 0.01f; // velocity north
+    _target_vel_ned_ms.y = packet.vy * 0.01f; // velocity east
+    _target_vel_ned_ms.z = packet.vz * 0.01f; // velocity down
+
+    // target acceleration not available in GLOBAL_POSITION_INT
+    _target_accel_ned_mss.zero();
 
     // apply jitter-corrected timestamp to this update
     _last_location_update_ms = _jitter.correct_offboard_timestamp_msec(packet.time_boot_ms, AP_HAL::millis());
@@ -701,7 +717,7 @@ bool AP_Follow::handle_follow_target_message(const mavlink_message_t &msg)
     }
 
     // build Location object from latitude, longitude, and altitude (alt in meters)
-    const Location _target_location {
+    const Location target_location {
         packet.lat,
         packet.lon,
         int32_t(packet.alt * 100),  // convert meters to centimeters
@@ -709,34 +725,15 @@ bool AP_Follow::handle_follow_target_message(const mavlink_message_t &msg)
     };
 
     // convert global location to local NED frame position
-    if (!_target_location.get_vector_from_origin_NEU(_target_pos_ned_m)) {
+    Vector3p target_pos_neu_m;
+    if (!target_location.get_vector_from_origin_NEU_m(target_pos_neu_m)) {
         return false;
     }
-    _target_pos_ned_m *= 0.01; // convert from cm to meters
 
     // adjust Z coordinate to NED frame (NEU altitude -> NED)
     Location origin;
     if (!AP::ahrs().get_origin(origin)) {
         return false;
-    }
-    _target_pos_ned_m.z = -packet.alt + origin.alt * 0.01;
-
-    // decode velocity if available (bit 1 of est_capabilities)
-    if (packet.est_capabilities & (1<<1)) {
-        _target_vel_ned_ms.x = packet.vel[0]; // velocity north
-        _target_vel_ned_ms.y = packet.vel[1]; // velocity east
-        _target_vel_ned_ms.z = packet.vel[2]; // velocity down
-    } else {
-        _target_vel_ned_ms.zero();
-    }
-
-    // decode acceleration if available (bit 2 of est_capabilities)
-    if (packet.est_capabilities & (1 << 2)) {
-        _target_accel_ned_mss.x = packet.acc[0]; // acceleration north
-        _target_accel_ned_mss.y = packet.acc[1]; // acceleration east
-        _target_accel_ned_mss.z = packet.acc[2]; // acceleration down
-    } else {
-        _target_accel_ned_mss.zero();
     }
 
     // decode attitude if available (bit 3 of est_capabilities)
@@ -763,6 +760,27 @@ bool AP_Follow::handle_follow_target_message(const mavlink_message_t &msg)
     } else {
         // otherwise, default heading rate to zero
         _target_heading_rate_degs = 0.0f;
+    }
+
+    _target_pos_ned_m.xy() = target_pos_neu_m.xy();
+    _target_pos_ned_m.z = -packet.alt + origin.alt * 0.01;
+
+    // decode velocity if available (bit 1 of est_capabilities)
+    if (packet.est_capabilities & (1<<1)) {
+        _target_vel_ned_ms.x = packet.vel[0]; // velocity north
+        _target_vel_ned_ms.y = packet.vel[1]; // velocity east
+        _target_vel_ned_ms.z = packet.vel[2]; // velocity down
+    } else {
+        _target_vel_ned_ms.zero();
+    }
+
+    // decode acceleration if available (bit 2 of est_capabilities)
+    if (packet.est_capabilities & (1 << 2)) {
+        _target_accel_ned_mss.x = packet.acc[0]; // acceleration north
+        _target_accel_ned_mss.y = packet.acc[1]; // acceleration east
+        _target_accel_ned_mss.z = packet.acc[2]; // acceleration down
+    } else {
+        _target_accel_ned_mss.zero();
     }
 
     // apply jitter-corrected timestamp to this update
@@ -858,11 +876,8 @@ void AP_Follow::update_dist_and_bearing_to_target()
         // if unable to retrieve local position, clear distance/bearing info
         clear_dist_and_bearing_to_target();
     } else {
-        // convert vehicle position to NED meters (NEU -> NED and cm -> m)
-        current_position_ned_m.z = -current_position_ned_m.z; // NEU to NED
-        current_position_ned_m *= 0.01;  // convert cm to m
-
-        // calculate distance vectors to target, both with and without offsets
+        // get_relative_position_NED_origin() already returns metres in the NED
+        // frame, matching _ofs_estimate_pos_ned_m, so no conversion is required.
         const Vector3p ofs_dist_vec = _ofs_estimate_pos_ned_m - current_position_ned_m;
 
         // record distance and bearing to target for reporting/logging
@@ -889,8 +904,8 @@ void AP_Follow::Log_Write_FOLL()
     Vector3f vel_estimate;
     UNUSED_RESULT(get_target_location_and_velocity(loc_estimate, vel_estimate));
 
-    Location _target_location;
-    UNUSED_RESULT(AP::ahrs().get_location_from_origin_offset_NED(_target_location, _target_pos_ned_m));
+    Location target_location;
+    UNUSED_RESULT(AP::ahrs().get_location_from_origin_offset_NED(target_location, _target_pos_ned_m));
 
     // log the lead target's reported position and vehicle's estimated position
     // @LoggerMessage: FOLL
@@ -912,9 +927,9 @@ void AP_Follow::Log_Write_FOLL()
                                 "F--B000--B-",    // mults
                                 "QLLifffLLib",    // fmt
                                 AP_HAL::micros64(),
-                                _target_location.lat,
-                                _target_location.lng,
-                                _target_location.alt,
+                                target_location.lat,
+                                target_location.lng,
+                                target_location.alt,
                                 (double)_target_vel_ned_ms.x,
                                 (double)_target_vel_ned_ms.y,
                                 (double)_target_vel_ned_ms.z,

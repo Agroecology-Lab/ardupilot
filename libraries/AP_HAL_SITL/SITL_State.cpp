@@ -31,39 +31,6 @@ extern const AP_HAL::HAL& hal;
 
 using namespace HALSITL;
 
-void SITL_State::_set_param_default(const char *parm)
-{
-    char *pdup = strdup(parm);
-    char *p = strchr(pdup, '=');
-    if (p == nullptr) {
-        printf("Please specify parameter as NAME=VALUE");
-        exit(1);
-    }
-    float value = strtof(p+1, nullptr);
-    *p = 0;
-    enum ap_var_type var_type;
-    AP_Param *vp = AP_Param::find(pdup, &var_type);
-    if (vp == nullptr) {
-        printf("Unknown parameter %s\n", pdup);
-        exit(1);
-    }
-    if (var_type == AP_PARAM_FLOAT) {
-        ((AP_Float *)vp)->set_and_save(value);
-    } else if (var_type == AP_PARAM_INT32) {
-        ((AP_Int32 *)vp)->set_and_save(value);
-    } else if (var_type == AP_PARAM_INT16) {
-        ((AP_Int16 *)vp)->set_and_save(value);
-    } else if (var_type == AP_PARAM_INT8) {
-        ((AP_Int8 *)vp)->set_and_save(value);
-    } else {
-        printf("Unable to set parameter %s\n", pdup);
-        exit(1);
-    }
-    printf("Set parameter %s to %f\n", pdup, value);
-    free(pdup);
-}
-
-
 /*
   setup for SITL handling
  */
@@ -295,26 +262,6 @@ void SITL_State::_simulator_servos(struct sitl_input &input)
     if (_sitl == nullptr) {
         return;
     }
-    static uint32_t last_update_usec;
-
-    /* this maps the registers used for PWM outputs. The RC
-     * driver updates these whenever it wants the channel output
-     * to change */
-
-    if (last_update_usec == 0 || !output_ready) {
-        if (_vehicle == ArduPlane) {
-            for (uint8_t i=0; i<SITL_NUM_CHANNELS; i++) {
-                pwm_output[i] = 1000;
-            }
-        }
-        if (_vehicle == ArduPlane) {
-            pwm_output[0] = pwm_output[1] = pwm_output[3] = 1500;
-        }
-    }
-
-    // output at chosen framerate
-    uint32_t now = AP_HAL::micros();
-    last_update_usec = now;
 
 #if AP_SIM_WIND_SIMULATION_ENABLED
     hal.simstate->update_simulated_wind(input);
@@ -368,7 +315,7 @@ void SITL_State::_simulator_servos(struct sitl_input &input)
         }
     }
 
-    float throttle = 0.0f;
+    float throttle = 0.0f; // 0 is 'no throttle', 1.0 is 'full' throttle
     if (_vehicle == ArduPlane) {
         float forward_throttle = constrain_float((input.servos[2] - 1000) / 1000.0f, 0.0f, 1.0f);
         // do a little quadplane dance

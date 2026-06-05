@@ -208,7 +208,7 @@ void AP_MSP_Telem_Backend::update_gps_state(gps_state_t &gps_state)
     memset(&gps_state, 0, sizeof(gps_state));
 
     WITH_SEMAPHORE(gps.get_semaphore());
-    gps_state.fix_type = gps.status() >= AP_GPS::GPS_Status::GPS_OK_FIX_3D? 2:0;
+    gps_state.fix_type = gps.status() >= AP_GPS_FixType::FIX_3D? 2:0;
     gps_state.num_sats = gps.num_sats();
 
     if (gps_state.fix_type > 0) {
@@ -255,7 +255,7 @@ void AP_MSP_Telem_Backend::update_airspeed(airspeed_state_t &airspeed_state)
 {
     AP_AHRS &ahrs = AP::ahrs();
     WITH_SEMAPHORE(ahrs.get_semaphore());
-    airspeed_state.airspeed_have_estimate = ahrs.airspeed_estimate(airspeed_state.airspeed_estimate_ms);
+    airspeed_state.airspeed_have_estimate = ahrs.airspeed_EAS(airspeed_state.airspeed_estimate_ms);
     if (!airspeed_state.airspeed_have_estimate) {
         airspeed_state.airspeed_estimate_ms = 0.0;
     }

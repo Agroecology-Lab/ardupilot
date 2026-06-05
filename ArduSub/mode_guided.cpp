@@ -104,12 +104,13 @@ void ModeGuided::guided_vel_control_start()
     sub.guided_mode = Guided_Velocity;
 
     // initialize vertical maximum speeds and acceleration
-    position_control->set_max_speed_accel_U_cm(-sub.get_pilot_speed_dn(), g.pilot_speed_up, g.pilot_accel_z);
-    position_control->set_correction_speed_accel_U_cm(-sub.get_pilot_speed_dn(), g.pilot_speed_up, g.pilot_accel_z);
+    // All limits must be positive
+    position_control->D_set_max_speed_accel_cm(sub.get_pilot_speed_dn(), g.pilot_speed_up, g.pilot_accel_z);
+    position_control->D_set_correction_speed_accel_cm(sub.get_pilot_speed_dn(), g.pilot_speed_up, g.pilot_accel_z);
 
     // initialise velocity controller
-    position_control->init_U_controller();
-    position_control->init_NE_controller();
+    position_control->D_init_controller();
+    position_control->NE_init_controller();
 
     // pilot always controls yaw
     sub.yaw_rate_only = false;
@@ -123,12 +124,13 @@ void ModeGuided::guided_posvel_control_start()
     sub.guided_mode = Guided_PosVel;
 
     // set vertical speed and acceleration
-    position_control->set_max_speed_accel_U_cm(sub.wp_nav.get_default_speed_down_cms(), sub.wp_nav.get_default_speed_up_cms(), sub.wp_nav.get_accel_U_cmss());
-    position_control->set_correction_speed_accel_U_cm(sub.wp_nav.get_default_speed_down_cms(), sub.wp_nav.get_default_speed_up_cms(), sub.wp_nav.get_accel_U_cmss());
+    // All limits must be positive
+    position_control->D_set_max_speed_accel_cm(sub.wp_nav.get_default_speed_down_cms(), sub.wp_nav.get_default_speed_up_cms(), sub.wp_nav.get_accel_D_cmss());
+    position_control->D_set_correction_speed_accel_cm(sub.wp_nav.get_default_speed_down_cms(), sub.wp_nav.get_default_speed_up_cms(), sub.wp_nav.get_accel_D_cmss());
 
     // initialise velocity controller
-    position_control->init_U_controller();
-    position_control->init_NE_controller();
+    position_control->D_init_controller();
+    position_control->NE_init_controller();
 
     // pilot always controls yaw
     sub.yaw_rate_only = false;
@@ -142,11 +144,12 @@ void ModeGuided::guided_angle_control_start()
     sub.guided_mode = Guided_Angle;
 
     // set vertical speed and acceleration
-    position_control->set_max_speed_accel_U_cm(sub.wp_nav.get_default_speed_down_cms(), sub.wp_nav.get_default_speed_up_cms(), sub.wp_nav.get_accel_U_cmss());
-    position_control->set_correction_speed_accel_U_cm(sub.wp_nav.get_default_speed_down_cms(), sub.wp_nav.get_default_speed_up_cms(), sub.wp_nav.get_accel_U_cmss());
+    // All limits must be positive
+    position_control->D_set_max_speed_accel_cm(sub.wp_nav.get_default_speed_down_cms(), sub.wp_nav.get_default_speed_up_cms(), sub.wp_nav.get_accel_D_cmss());
+    position_control->D_set_correction_speed_accel_cm(sub.wp_nav.get_default_speed_down_cms(), sub.wp_nav.get_default_speed_up_cms(), sub.wp_nav.get_accel_D_cmss());
 
     // initialise velocity controller
-    position_control->init_U_controller();
+    position_control->D_init_controller();
 
     // initialise targets
     guided_angle_state.update_time_ms = AP_HAL::millis();
@@ -168,7 +171,7 @@ bool ModeGuided::guided_set_destination(const Vector3f& destination)
 #if AP_FENCE_ENABLED
     // reject destination if outside the fence
     const Location dest_loc(destination, Location::AltFrame::ABOVE_ORIGIN);
-    if (!sub.fence.check_destination_within_fence(dest_loc)) {
+    if (!sub.fence.check_location_within_fence(dest_loc)) {
         LOGGER_WRITE_ERROR(LogErrorSubsystem::NAVIGATION, LogErrorCode::DEST_OUTSIDE_FENCE);
         // failure is propagated to GCS with NAK
         return false;
@@ -199,7 +202,7 @@ bool ModeGuided::guided_set_destination(const Location& dest_loc)
 #if AP_FENCE_ENABLED
     // reject destination outside the fence.
     // Note: there is a danger that a target specified as a terrain altitude might not be checked if the conversion to alt-above-home fails
-    if (!sub.fence.check_destination_within_fence(dest_loc)) {
+    if (!sub.fence.check_location_within_fence(dest_loc)) {
         LOGGER_WRITE_ERROR(LogErrorSubsystem::NAVIGATION, LogErrorCode::DEST_OUTSIDE_FENCE);
         // failure is propagated to GCS with NAK
         return false;
@@ -234,7 +237,7 @@ bool ModeGuided::guided_set_destination(const Vector3f& destination, bool use_ya
 #if AP_FENCE_ENABLED
     // reject destination if outside the fence
     const Location dest_loc(destination, Location::AltFrame::ABOVE_ORIGIN);
-    if (!sub.fence.check_destination_within_fence(dest_loc)) {
+    if (!sub.fence.check_location_within_fence(dest_loc)) {
         LOGGER_WRITE_ERROR(LogErrorSubsystem::NAVIGATION, LogErrorCode::DEST_OUTSIDE_FENCE);
         // failure is propagated to GCS with NAK
         return false;
@@ -300,7 +303,7 @@ bool ModeGuided::guided_set_destination_posvel(const Vector3f& destination, cons
 #if AP_FENCE_ENABLED
     // reject destination if outside the fence
     const Location dest_loc(destination, Location::AltFrame::ABOVE_ORIGIN);
-    if (!sub.fence.check_destination_within_fence(dest_loc)) {
+    if (!sub.fence.check_location_within_fence(dest_loc)) {
         LOGGER_WRITE_ERROR(LogErrorSubsystem::NAVIGATION, LogErrorCode::DEST_OUTSIDE_FENCE);
         // failure is propagated to GCS with NAK
         return false;
@@ -335,7 +338,7 @@ bool ModeGuided::guided_set_destination_posvel(const Vector3f& destination, cons
     #if AP_FENCE_ENABLED
     // reject destination if outside the fence
     const Location dest_loc(destination, Location::AltFrame::ABOVE_ORIGIN);
-    if (!sub.fence.check_destination_within_fence(dest_loc)) {
+    if (!sub.fence.check_location_within_fence(dest_loc)) {
         LOGGER_WRITE_ERROR(LogErrorSubsystem::NAVIGATION, LogErrorCode::DEST_OUTSIDE_FENCE);
         // failure is propagated to GCS with NAK
         return false;
@@ -461,7 +464,7 @@ void ModeGuided::guided_pos_control_run()
     if (!motors.armed()) {
         motors.set_desired_spool_state(AP_Motors::DesiredSpoolState::GROUND_IDLE);
         // Sub vehicles do not stabilize roll/pitch/yaw when disarmed
-        attitude_control->set_throttle_out(0,true,g.throttle_filt);
+        attitude_control->set_throttle_out(NEUTRAL_THROTTLE,true,g.throttle_filt);
         attitude_control->relax_attitude_controllers();
         sub.wp_nav.wp_and_spline_init_m();
         return;
@@ -498,7 +501,7 @@ void ModeGuided::guided_pos_control_run()
 
     // WP_Nav has set the vertical position control targets
     // run the vertical position controller and set output throttle
-    position_control->update_U_controller();
+    position_control->D_update_controller();
 
     // call attitude controller
     if (sub.auto_yaw_mode == AUTO_YAW_HOLD) {
@@ -526,11 +529,11 @@ void ModeGuided::guided_vel_control_run()
     if (!motors.armed()) {
         motors.set_desired_spool_state(AP_Motors::DesiredSpoolState::GROUND_IDLE);
         // Sub vehicles do not stabilize roll/pitch/yaw when disarmed
-        attitude_control->set_throttle_out(0,true,g.throttle_filt);
+        attitude_control->set_throttle_out(NEUTRAL_THROTTLE,true,g.throttle_filt);
         attitude_control->relax_attitude_controllers();
         // initialise velocity controller
-        position_control->init_U_controller();
-        position_control->init_NE_controller();
+        position_control->D_init_controller();
+        position_control->NE_init_controller();
         return;
     }
 
@@ -559,12 +562,12 @@ void ModeGuided::guided_vel_control_run()
         position_control->set_vel_desired_NEU_cms(Vector3f(0,0,0));
     }
 
-    position_control->stop_pos_NE_stabilisation();
+    position_control->NE_stop_pos_stabilisation();
     // call velocity controller which includes z axis controller
-    position_control->update_NE_controller();
+    position_control->NE_update_controller();
 
-    position_control->set_pos_target_U_from_climb_rate_cm(position_control->get_vel_desired_NEU_cms().z);
-    position_control->update_U_controller();
+    position_control->D_set_pos_target_from_climb_rate_cms(position_control->get_vel_desired_NEU_cms().z);
+    position_control->D_update_controller();
 
     float lateral_out, forward_out;
     sub.translate_pos_control_rp(lateral_out, forward_out);
@@ -599,11 +602,11 @@ void ModeGuided::guided_posvel_control_run()
     if (!motors.armed()) {
         motors.set_desired_spool_state(AP_Motors::DesiredSpoolState::GROUND_IDLE);
         // Sub vehicles do not stabilize roll/pitch/yaw when disarmed
-        attitude_control->set_throttle_out(0,true,g.throttle_filt);
+        attitude_control->set_throttle_out(NEUTRAL_THROTTLE,true,g.throttle_filt);
         attitude_control->relax_attitude_controllers();
         // initialise velocity controller
-        position_control->init_U_controller();
-        position_control->init_NE_controller();
+        position_control->D_init_controller();
+        position_control->NE_init_controller();
         return;
     }
 
@@ -643,8 +646,8 @@ void ModeGuided::guided_posvel_control_run()
     posvel_pos_target_cm.z = pz;
 
     // run position controller
-    position_control->update_NE_controller();
-    position_control->update_U_controller();
+    position_control->NE_update_controller();
+    position_control->D_update_controller();
 
     float lateral_out, forward_out;
     sub.translate_pos_control_rp(lateral_out, forward_out);
@@ -679,10 +682,10 @@ void ModeGuided::guided_angle_control_run()
     if (!motors.armed()) {
         motors.set_desired_spool_state(AP_Motors::DesiredSpoolState::GROUND_IDLE);
         // Sub vehicles do not stabilize roll/pitch/yaw when disarmed
-        attitude_control->set_throttle_out(0.0f,true,g.throttle_filt);
+        attitude_control->set_throttle_out(NEUTRAL_THROTTLE,true,g.throttle_filt);
         attitude_control->relax_attitude_controllers();
         // initialise velocity controller
-        position_control->init_U_controller();
+        position_control->D_init_controller();
         return;
     }
 
@@ -690,7 +693,7 @@ void ModeGuided::guided_angle_control_run()
     float roll_in = guided_angle_state.roll_cd;
     float pitch_in = guided_angle_state.pitch_cd;
     float total_in = norm(roll_in, pitch_in);
-    float angle_max = MIN(attitude_control->get_althold_lean_angle_max_cd(), sub.aparm.angle_max);
+    float angle_max = MIN(attitude_control->get_althold_lean_angle_max_cd(), attitude_control->lean_angle_max_cd());
     if (total_in > angle_max) {
         float ratio = angle_max / total_in;
         roll_in *= ratio;
@@ -718,8 +721,8 @@ void ModeGuided::guided_angle_control_run()
     attitude_control->input_euler_angle_roll_pitch_yaw_cd(roll_in, pitch_in, yaw_in, true);
 
     // call position controller
-    position_control->set_pos_target_U_from_climb_rate_cm(climb_rate_cms);
-    position_control->update_U_controller();
+    position_control->D_set_pos_target_from_climb_rate_cms(climb_rate_cms);
+    position_control->D_update_controller();
 }
 
 // Guided Limit code
@@ -811,10 +814,10 @@ float ModeGuided::get_auto_heading()
         float track_bearing = get_bearing_cd(sub.wp_nav.get_wp_origin_NEU_cm().xy(), sub.wp_nav.get_wp_destination_NEU_cm().xy());
 
         // Bearing from current position towards intermediate position target (centidegrees)
-        const Vector2f target_vel_xy = position_control->get_vel_target_NEU_cms().xy();
+        const Vector2f target_vel_ne_cms = position_control->get_vel_target_NEU_cms().xy();
         float angle_error = 0.0f;
-        if (target_vel_xy.length() >= position_control->get_max_speed_NE_cms() * 0.1f) {
-            const float desired_angle_cd = degrees(target_vel_xy.angle()) * 100.0f;
+        if (target_vel_ne_cms.length() >= position_control->NE_get_max_speed_cms() * 0.1f) {
+            const float desired_angle_cd = degrees(target_vel_ne_cms.angle()) * 100.0f;
             angle_error = wrap_180_cd(desired_angle_cd - track_bearing);
         }
         float angle_limited = constrain_float(angle_error, -g.xtrack_angle_limit * 100.0f, g.xtrack_angle_limit * 100.0f);
@@ -847,7 +850,9 @@ void ModeGuided::guided_limit_init_time_and_pos()
     guided_limit.start_time_ms = AP_HAL::millis();
 
     // initialise start position from current position
-    guided_limit.start_pos_neu_cm = inertial_nav.get_position_neu_cm();
+    Vector3f pos_cm = (position_control->get_pos_estimate_NED_m() * 100.0f).tofloat();
+    pos_cm.z = -pos_cm.z;
+    guided_limit.start_pos_neu_cm = pos_cm;
 }
 
 // guided_limit_check - returns true if guided mode has breached a limit
@@ -860,7 +865,8 @@ bool ModeGuided::guided_limit_check()
     }
 
     // get current location
-    const Vector3f& curr_pos_neu_cm = inertial_nav.get_position_neu_cm();
+    Vector3f curr_pos_neu_cm = (position_control->get_pos_estimate_NED_m() * 100.0f).tofloat();
+    curr_pos_neu_cm.z = -curr_pos_neu_cm.z;
 
     // check if we have gone below min alt
     if (!is_zero(guided_limit.alt_min_cm) && (curr_pos_neu_cm.z < guided_limit.alt_min_cm)) {

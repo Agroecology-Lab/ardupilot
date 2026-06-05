@@ -51,6 +51,8 @@ public:
 
     CLASS_NO_COPY(AP_AHRS_SIM);
 
+    const char *shortname() const override { return "SIM"; }
+
     // reset the current gyro drift estimate
     //  should be called if gyro offsets are recalculated
     void reset_gyro_drift() override {};
@@ -59,9 +61,6 @@ public:
     void            update() override { }
     void            get_results(Estimates &results) override;
     void            reset() override { return; }
-
-    // get latest altitude estimate above ground level in meters and validity flag
-    bool get_hagl(float &hagl) const override WARN_IF_UNUSED;
 
     // return a wind estimation vector, in m/s
     bool wind_estimate(Vector3f &wind) const override;
@@ -74,22 +73,10 @@ public:
     // if we have an estimate from a specific sensor index
     bool airspeed_EAS(uint8_t airspeed_index, float &airspeed_ret) const override;
 
-    // return a ground vector estimate in meters/second, in North/East order
-    Vector2f groundspeed_vector() override;
-
     bool            use_compass() override { return true; }
-
-    // return the quaternion defining the rotation from NED to XYZ (body) axes
-    bool get_quaternion(Quaternion &quat) const override WARN_IF_UNUSED;
 
     // is the AHRS subsystem healthy?
     bool healthy() const override { return true; }
-
-    bool get_velocity_NED(Vector3f &vec) const override;
-
-    // Get a derivative of the vertical position in m/s which is kinematically consistent with the vertical position is required by some control loops.
-    // This is different to the vertical velocity from the EKF which is not always consistent with the vertical position due to the various errors that are being corrected for.
-    bool get_vert_pos_rate_D(float &velocity) const override;
 
     // returns false if we fail arming checks, in which case the buffer will be populated with a failure message
     // requires_position should be true if horizontal position configuration should be checked (not used)

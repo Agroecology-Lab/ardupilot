@@ -64,7 +64,7 @@ value = param:get('RTL_RADIUS')
 if value then
   value = math.abs(value)
   if value > 0 then
-    home_reached_rad = math.abs(value) * 2
+    home_reached_rad = value * 2
   else 
     value = param:get('WP_LOITER_RAD')
     if value then
@@ -300,7 +300,7 @@ function update()
   end
 
   -- check airspeed
-  local air_speed_in = ahrs:airspeed_estimate()
+  local air_speed_in = ahrs:airspeed_EAS()
   if not air_speed_in then
     error("Could not read airspeed")
   end

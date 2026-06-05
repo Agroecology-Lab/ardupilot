@@ -6,22 +6,17 @@ Waf tool for Linux build
 AP_FLAKE8_CLEAN
 """
 
-from waflib.TaskGen import after_method, before_method, feature
-
 import os
 import sys
 import traceback
 
 import hal_common
 
+from waflib.TaskGen import after_method
+from waflib.TaskGen import feature
+
 sys.path.append(os.path.join(os.path.dirname(os.path.realpath(__file__)), '../../libraries/AP_HAL_Linux/hwdef/scripts'))
-import linux_hwdef  # noqa:501
-
-
-@feature('linux_ap_library', 'linux_ap_program')
-@before_method('process_source')
-def linux_dynamic_env(self):
-    hal_common.common_dynamic_env(self)
+import linux_hwdef  # noqa: E402
 
 
 @feature('linux_ap_program')
@@ -51,11 +46,11 @@ def configure(cfg):
     env.AP_PROGRAM_FEATURES += ['linux_ap_program']
 
     try:
-        hwdef_env = generate_hwdef_h(env)
-    except Exception:
+        hwdef_obj = generate_hwdef_h(env)
+    except Exception:  # noqa: BLE001
         traceback.print_exc()
-        cfg.fatal("Failed to generate hwdef")
-    hal_common.load_env_vars(cfg.env, hwdef_env)
+        cfg.fatal("Failed to process hwdef.dat")
+    hal_common.process_hwdef_results(cfg, hwdef_obj)
 
 
 def generate_hwdef_h(env):
@@ -70,13 +65,15 @@ def generate_hwdef_h(env):
     hwdef = [env.HWDEF]
     if env.HWDEF_EXTRA:
         hwdef.append(env.HWDEF_EXTRA)
-    lh = linux_hwdef.LinuxHWDef(
+
+    hwdef_obj = linux_hwdef.LinuxHWDef(
         outdir=hwdef_out,
         hwdef=hwdef,
         quiet=False,
     )
-    lh.run()
-    return lh.env_vars
+    hwdef_obj.run()
+
+    return hwdef_obj
 
 
 def pre_build(bld):
@@ -85,11 +82,3 @@ def pre_build(bld):
         bld.get_board().with_can = True
     if bld.env.WITH_LITTLEFS:
         bld.get_board().with_littlefs = True
-    hwdef_h = os.path.join(bld.env.BUILDROOT, 'hwdef.h')
-    if not os.path.exists(hwdef_h):
-        print("Generating hwdef.h")
-        try:
-            generate_hwdef_h(bld.env)
-            # TRAP: env vars are not reloaded!
-        except Exception:
-            bld.fatal(f"Failed to process hwdef.dat {hwdef_h}")

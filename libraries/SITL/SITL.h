@@ -59,6 +59,7 @@ class FlightAxis;
 struct sitl_fdm {
     // this is the structure passed between FDM models and the main SITL code
     uint64_t timestamp_us;
+    uint64_t flightaxis_imu_frame_num; // the sitl frame number that should have a corresponding imu sample
     Location home;
     double latitude, longitude; // degrees
     double altitude;  // MSL
@@ -72,7 +73,6 @@ struct sitl_fdm {
     Vector3f velocity_air_bf; // velocity relative to airmass, body frame, TAS
     double battery_voltage; // Volts
     double battery_current; // Amps
-    double battery_remaining; // Ah, if non-zero capacity
     uint8_t num_motors;
     uint32_t motor_mask;
     float rpm[32];         // RPM of all motors
@@ -114,6 +114,24 @@ class SIM {
 public:
 
     SIM() {
+        if (_singleton != nullptr) {
+            AP_HAL::panic("Too many SITL instances");
+        }
+        _singleton = this;
+    }
+
+    /* Do not allow copies */
+    CLASS_NO_COPY(SIM);
+
+    static SIM *_singleton;
+    static SIM *get_singleton() { return _singleton; }
+
+    void init() {
+        if (init_done) {
+            return;
+        }
+        init_done = true;
+
         AP_Param::setup_object_defaults(this, var_info);
         AP_Param::setup_object_defaults(this, var_info2);
         AP_Param::setup_object_defaults(this, var_info3);
@@ -122,6 +140,7 @@ public:
 #endif
         AP_Param::setup_object_defaults(this, var_mag);
         AP_Param::setup_object_defaults(this, var_ins);
+        AP_Param::setup_object_defaults(this, var_sonar);
 #ifdef SFML_JOYSTICK
         AP_Param::setup_object_defaults(this, var_sfml_joystick);
 #endif // SFML_JOYSTICK
@@ -135,22 +154,14 @@ public:
         for (uint8_t i = 0; i < HAL_COMPASS_MAX_SENSORS; i++) {
             mag_ofs[i].set(Vector3f(5, 13, -18));
         }
-        if (_singleton != nullptr) {
-            AP_HAL::panic("Too many SITL instances");
-        }
-        _singleton = this;
     }
-
-    /* Do not allow copies */
-    CLASS_NO_COPY(SIM);
-
-    static SIM *_singleton;
-    static SIM *get_singleton() { return _singleton; }
+    bool init_done;
 
     enum SITL_RCFail {
         SITL_RCFail_None = 0,
         SITL_RCFail_NoPulses = 1,
         SITL_RCFail_Throttle950 = 2,
+        SITL_RCFail_Protocol_Fail_Bit_Set = 3,
     };
 
     enum GPSHeading {
@@ -161,9 +172,13 @@ public:
         GPS_HEADING_BASE = 4,  // act as an RTK base
     };
 
+    enum class GPSOptions : uint32_t {
+        UBX_IS_F9P = 1U << 0,
+    };
+
     struct sitl_fdm state;
 
-    // throttle when motors are active
+    // throttle when motors are active. 0 = 'no throttle', 1 = 'full throttle'
     float throttle;
 
     static const struct AP_Param::GroupInfo var_info[];
@@ -174,6 +189,7 @@ public:
 #endif
     static const struct AP_Param::GroupInfo var_mag[];
     static const struct AP_Param::GroupInfo var_ins[];
+    static const struct AP_Param::GroupInfo var_sonar[];
 #ifdef SFML_JOYSTICK
     static const struct AP_Param::GroupInfo var_sfml_joystick[];
 #endif //SFML_JOYSTICK
@@ -195,6 +211,7 @@ public:
     AP_Float sonar_noise; // in metres
     AP_Float sonar_scale; // meters per volt
     AP_Int8 sonar_rot;  // from rotations enumeration
+    AP_Float sonar_offset; // offset measurement, in meters. Can be used for error injection.
 
     AP_Float drift_speed; // degrees/second/minute
     AP_Float drift_time;  // period in minutes
@@ -323,6 +340,8 @@ public:
         AP_Vector3f vel_err; // Velocity error offsets in NED (x = N, y = E, z = D)
         AP_Int8 jam; // jamming simulation enable
         AP_Float heading_offset; // heading offset in degrees
+        AP_Int32 options; // GPS options bitmask
+        AP_Int8 fix_type; // GPS fix type
     };
     GPSParms gps[AP_SIM_MAX_GPS_SENSORS];
 
@@ -345,6 +364,7 @@ public:
         AP_Int8 type_mask;    // vicon message type mask (bit0:vision position estimate, bit1:vision speed estimate, bit2:vicon position estimate)
         AP_Vector3f vel_glitch;   // velocity glitch in m/s in vicon's local frame
         AP_Int16 rate_hz;     // vicon data rate in Hz
+        AP_Int8 quality;      // odometry quality [-1,100]
     };
     ViconParms vicon;
 #endif  // AP_SIM_VICON_ENABLED

@@ -29,11 +29,14 @@ AP_FLAKE8_CLEAN
 
 """
 
-import os
-import json
-import re
+from __future__ import annotations
+
 import glob
+import json
+import os
+import re
 import subprocess
+
 from argparse import ArgumentParser
 
 
@@ -80,7 +83,7 @@ def parse_arguments():
     return args
 
 
-def check_file(file, metadata, skip=SkippedChecks()):
+def check_file(file, metadata, skip: SkippedChecks | None = None):
     """Checks a single parameter file against the metadata.
 
     Loads the parameters from the specified file and validates each parameter
@@ -96,6 +99,9 @@ def check_file(file, metadata, skip=SkippedChecks()):
     Returns:
         list: A list of error messages if any parameters are invalid.
     """
+    if skip is None:
+        skip = SkippedChecks()
+
     params, msgs = load_params(file, skip)
 
     for param in params:
@@ -126,7 +132,7 @@ def check_file(file, metadata, skip=SkippedChecks()):
     return msgs
 
 
-def check_param(name, value, metadata, skip=SkippedChecks()):
+def check_param(name, value, metadata, skip: SkippedChecks | None = None):
     """Checks a single parameter against its metadata definition.
 
     Validates the specified parameter. If the metadata contains multiple types
@@ -143,6 +149,8 @@ def check_param(name, value, metadata, skip=SkippedChecks()):
         str: An error message if the parameter is invalid, or None otherwise.
     """
     # List of checks with their corresponding skip flags and check functions
+    if skip is None:
+        skip = SkippedChecks()
     checks = [
         (
             'ReadOnly',
@@ -259,7 +267,7 @@ def check_values(name, value, metadata):
     return None
 
 
-def load_params(file, skip=SkippedChecks(), depth=0):
+def load_params(file, skip: SkippedChecks | None = None, depth=0):
     """Loads a parameter file and returns parameters and errors.
 
     Reads the specified parameter file, stripping out comments. It checks the
@@ -283,6 +291,9 @@ def load_params(file, skip=SkippedChecks(), depth=0):
             - errors (list): A list of error messages encountered during
               parsing.
     """
+    if skip is None:
+        skip = SkippedChecks()
+
     if depth > 10:
         raise ValueError("Too many levels of @include")
 
@@ -390,7 +401,7 @@ def generate_metadata(vehicle):
 
     try:
         subprocess.run(
-            ['python3', metadata_script, f'--vehicle={vehicle}', '--format=json'],
+            ['python3', metadata_script, f'--vehicle={vehicle}', '--format=json', '--no-legacy-params'],
             check=True,
             capture_output=True,
             text=True
@@ -476,7 +487,7 @@ def main():
     metadata = get_metadata(args.vehicle.split(','))
 
     # Dictionary to store error messages for each file
-    messages = {} # {filename: [error messages]}
+    messages = {}  # {filename: [error messages]}
 
     # Check each file, and store any error messages
     for file in args.files:
@@ -484,19 +495,19 @@ def main():
         messages[os.path.relpath(file)] = msgs
 
     # Print the success/failure for each file
-    for file in messages:
-        if not messages[file]:
+    for file, msgs in messages.items():
+        if not msgs:
             if not args.quiet_success:
                 print(f'{file}: Passed')
         else:
             print(f'{file}: Failed')
-            for msg in messages[file]:
+            for msg in msgs:
                 print(f'  {msg}')
 
     # Check if any files failed (i.e. have error messages)
-    if any(messages[file] for file in messages):
+    if any(msgs for msgs in messages.values()):
         exit(1)
 
 
 if __name__ == '__main__':
-    main() # pragma: no cover
+    main()  # pragma: no cover

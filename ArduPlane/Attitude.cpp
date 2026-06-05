@@ -8,14 +8,29 @@
 float Plane::calc_speed_scaler(void)
 {
     float aspeed, speed_scaler;
-    if (ahrs.airspeed_estimate(aspeed)) {
+    if (ahrs.airspeed_EAS(aspeed)) {
         if (aspeed > auto_state.highest_airspeed && arming.is_armed_and_safety_off()) {
             auto_state.highest_airspeed = aspeed;
         }
         // ensure we have scaling over the full configured airspeed
         const float airspeed_min = MAX(aparm.airspeed_min, MIN_AIRSPEED_MIN);
         const float scale_min = MIN(0.5, g.scaling_speed / (2.0 * aparm.airspeed_max));
+#if HAL_QUADPLANE_ENABLED
+        float scale_max;
+        if (quadplane.is_flying_vtol()) {
+            // vtol aircraft can generate excessive large aero control surface deflections
+            // during VTOL operation because the low airspeed can create large speed scaler
+            // values at a flight condition where aero control surfaces have little influence.
+            const float stall_airspeed_1g = is_positive(aparm.airspeed_stall)
+                                            ? aparm.airspeed_stall : 0.7f * airspeed_min;
+            scale_max = g.scaling_speed / stall_airspeed_1g;
+        } else {
+            // use the legacy scaling limit for FW flight
+            scale_max = MAX(2.0, g.scaling_speed / (0.7 * airspeed_min));
+        }
+#else
         const float scale_max = MAX(2.0, g.scaling_speed / (0.7 * airspeed_min));
+#endif
         if (aspeed > 0.0001f) {
             speed_scaler = g.scaling_speed / aspeed;
         } else {
@@ -123,8 +138,17 @@ void Plane::stabilize_roll()
         nav_roll_cd += 18000;
         if (ahrs.roll_sensor < 0) nav_roll_cd -= 36000;
     }
+    float roll_out = stabilize_roll_get_roll_out();
 
-    const float roll_out = stabilize_roll_get_roll_out();
+#if AP_PLANE_SYSTEMID_ENABLED
+    const auto &systemid = plane.g2.systemid;
+    if (systemid.is_running_fw()) {
+        Vector3f offset;
+        offset = systemid.get_output_offset();
+        roll_out += offset.x * 100.0f;
+    }
+#endif 
+
     SRV_Channels::set_output_scaled(SRV_Channel::k_aileron, roll_out);
 }
 
@@ -177,7 +201,17 @@ void Plane::stabilize_pitch()
         return;
     }
 
-    const float pitch_out = stabilize_pitch_get_pitch_out();
+    float pitch_out = stabilize_pitch_get_pitch_out();
+
+#if AP_PLANE_SYSTEMID_ENABLED
+    const auto &systemid = plane.g2.systemid;
+    if (systemid.is_running_fw()) {
+        Vector3f offset;
+        offset = systemid.get_output_offset();
+        pitch_out += offset.y * 100.0f;
+    }
+#endif 
+
     SRV_Channels::set_output_scaled(SRV_Channel::k_elevator, pitch_out);
 }
 
@@ -399,6 +433,12 @@ void Plane::stabilize()
 #if HAL_QUADPLANE_ENABLED
     if (quadplane.available()) {
         quadplane.transition->set_FW_roll_pitch(nav_pitch_cd, nav_roll_cd);
+    }
+#endif
+
+#if AP_PLANE_SYSTEMID_ENABLED
+    if (plane.g2.systemid.is_running_fw()) {
+        plane.g2.systemid.fw_update();
     }
 #endif
 

@@ -1,15 +1,13 @@
 # The CUBE Yellow is a variant of The CUBE Black from ProfiCNC/Hex
 # with a STM32F777 MCU
 
-define HAL_CHIBIOS_ARCH_CUBE 1
+# if the user has both isolated sensors enabled then force-enable the
+#  non-isolated IMU regardless of parameter setting.  This is done in
+#  case the isolated board fails.
+define AP_INERTIALSENSOR_FORCE_ENABLE_NONISOLATED_INSTANCE 1
 
 # MCU class and specific type
 MCU STM32F7xx STM32F777xx
-
-# we set a specific HAL_BOARD_SUBTYPE, allowing for custom config in
-# drivers. For this to be used the subtype needs to be added to
-# AP_HAL/AP_HAL_Boards.h as well
-define CONFIG_HAL_BOARD_SUBTYPE HAL_BOARD_SUBTYPE_CHIBIOS_FMUV3
 
 # now we need to specify the APJ_BOARD_ID. This is the ID that the
 # bootloader presents to GCS software so it knows if this firmware is
@@ -386,7 +384,7 @@ BARO MS5611 SPI:ms5611
 COMPASS AK09916:probe_ICM20948 0 ROTATION_ROLL_180_YAW_90
 
 # also probe for external compasses
-define HAL_PROBE_EXTERNAL_I2C_COMPASSES
+define AP_COMPASS_PROBING_ENABLED 1
 
 # this adds a C define which sets up the ArduPilot architecture
 # define. Any line starting with 'define' is copied literally as
@@ -450,3 +448,4 @@ ROMFS io_firmware_dshot.bin Tools/IO_Firmware/iofirmware_cube_dshot_highpolh.bin
 define HAL_WITH_IO_MCU_DSHOT 1
 
 define AP_IOMCU_PROFILED_SUPPORT_ENABLED 1
+

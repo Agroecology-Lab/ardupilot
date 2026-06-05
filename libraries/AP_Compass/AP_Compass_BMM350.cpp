@@ -452,13 +452,7 @@ void AP_Compass_BMM350::timer()
     float magx = (float)magx_raw * BMM350_XY_SCALE;
     float magy = (float)magy_raw * BMM350_XY_SCALE;
     float magz = (float)magz_raw * BMM350_Z_SCALE;
-    float temp = (float)temp_raw * BMM350_TEMP_SCALE;
-
-    if (temp > 0.0f) {
-        temp -= 25.49f;
-    } else if (temp < 0.0f) {
-        temp += 25.49f;
-    }
+    float temp = ((float)temp_raw * BMM350_TEMP_SCALE) - 25.49f;
 
     // Apply compensation
     temp = ((1 + _mag_comp.sensit_coef.temp) * temp) + _mag_comp.offset_coef.temp;
@@ -481,11 +475,6 @@ void AP_Compass_BMM350::timer()
     // Store in field vector and convert uT to milligauss
     Vector3f field { cr_ax_comp_x * 10.0f, cr_ax_comp_y * 10.0f, cr_ax_comp_z * 10.0f };
     accumulate_sample(field);
-}
-
-void AP_Compass_BMM350::read()
-{
-    drain_accumulated_samples();
 }
 
 #endif  // AP_COMPASS_BMM350_ENABLED

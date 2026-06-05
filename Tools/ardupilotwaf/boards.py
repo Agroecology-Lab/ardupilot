@@ -47,7 +47,6 @@ class Board:
 
     def configure(self, cfg):
         cfg.env.TOOLCHAIN = cfg.options.toolchain or self.toolchain
-        cfg.env.ROMFS_FILES = []
         if hasattr(self,'configure_toolchain'):
             self.configure_toolchain(cfg)
         else:
@@ -259,6 +258,13 @@ class Board:
         return (int(major) > want_major or
                 (int(major) == want_major and int(minor) >= want_minor))
 
+    def cc_version_lte(self, cfg, want_major, want_minor):
+        if cfg.env.TOOLCHAIN == "custom":
+            return True
+        (major, minor, patchlevel) = cfg.env.CC_VERSION
+        return (int(major) < want_major or
+                (int(major) == want_major and int(minor) <= want_minor))
+
     def configure_env(self, cfg, env):
         # Use a dictionary instead of the conventional list for definitions to
         # make easy to override them. Convert back to list before consumption.
@@ -332,6 +338,7 @@ class Board:
                 '-Werror=implicit-fallthrough',
                 '-cl-single-precision-constant',
                 '-Wno-vla-extension',
+                '-ftrapping-math',  # prevent re-ordering of sanity checks
             ]
         else:
             env.CFLAGS += [
@@ -394,6 +401,7 @@ class Board:
             '-Wno-redundant-decls',
             '-Wno-unknown-pragmas',
             '-Wno-expansion-to-defined',
+            '-Wno-invalid-offsetof',
             '-Werror=reorder',
             '-Werror=cast-align',
             '-Werror=attributes',
@@ -423,12 +431,14 @@ class Board:
             '-Warray-bounds',
         ]
 
+        use_prefix_map = False
         if 'clang++' in cfg.env.COMPILER_CXX:
             env.CXXFLAGS += [
                 '-fcolor-diagnostics',
 
                 '-Werror=address-of-packed-member',
 
+                '-Werror=unknown-warning-option',
                 '-Werror=inconsistent-missing-override',
                 '-Werror=overloaded-virtual',
 
@@ -452,7 +462,10 @@ class Board:
                 '-Wno-gnu-variable-sized-type-not-at-end',
                 '-Werror=implicit-fallthrough',
                 '-cl-single-precision-constant',
+                '-ftrapping-math',  # prevent re-ordering of sanity checks
             ]
+            if self.cc_version_gte(cfg, 10, 0):
+                use_prefix_map = True
         else:
             env.CXXFLAGS += [
                 '-Wno-format-contains-nul',
@@ -470,6 +483,8 @@ class Board:
                     '-Werror=maybe-uninitialized',
                     '-Werror=duplicated-cond',
                 ]
+            if self.cc_version_gte(cfg, 8, 0):
+                use_prefix_map = True
             if self.cc_version_gte(cfg, 8, 4):
                 env.CXXFLAGS += [
                     '-Werror=sizeof-pointer-div',
@@ -481,6 +496,37 @@ class Board:
                 env.CFLAGS += [
                     '-Werror=use-after-free',
                 ]
+            if self.cc_version_gte(cfg, 14, 0) and self.cc_version_lte(cfg, 16, 1):
+                # the following warnings appear to be buggy in later compiler versions
+                # https://github.com/ArduPilot/ardupilot/issues/33206
+                # TODO: readdress following a 16.2+ release
+                env.CXXFLAGS += [
+                    '-Wno-error=maybe-uninitialized',
+                    '-Wno-error=format-truncation',
+                    '-Wno-error=array-bounds',
+                ]
+
+        if cfg.env.TOOLCHAIN == "custom":
+            # the QURT board stuff should be extracting the compiler
+            # version properly.  In the meantime, here's a really
+            # awesome thing:
+            use_prefix_map = False
+
+        if use_prefix_map:
+            # fixes to make __FILE__ and debug paths repeatable in .elf/.bin
+
+            # build root including variant (e.g. by default build/sitl)
+            bldnode = cfg.bldnode.make_node(cfg.variant)
+            # compute source root path from the perspective of the exact build
+            # root above. this path is (as far as we can tell) what waf
+            # prefixes source files with when passing them to the compiler
+            file_prefix = str(cfg.srcnode.path_from(bldnode))
+
+            # now tell the compiler to remap that prefix to `../..` (the prefix
+            # by default) so any stored source paths are independent of
+            # wherever the build dir is and the debugger can find the source
+            cfg.env.CFLAGS += [f"-ffile-prefix-map={file_prefix}=../.."]
+            cfg.env.CXXFLAGS += [f"-ffile-prefix-map={file_prefix}=../.."]
 
         if cfg.options.Werror:
             errors = ['-Werror',
@@ -555,18 +601,18 @@ class Board:
         if cfg.options.ekf_single:
             env.CXXFLAGS += ['-DHAL_WITH_EKF_DOUBLE=0']
 
-        if cfg.options.consistent_builds:
+        if cfg.env.CONSISTENT_BUILDS:
             # if symbols are renamed we don't want them to affect the output:
             env.CXXFLAGS += ['-fno-rtti']
             # avoid different filenames for the same source file
             # affecting the compiler output:
             env.CXXFLAGS += ['-frandom-seed=4']  # ob. xkcd
 
-            # stop including a unique ID in the headers.  More useful
-            # when trying to find binary differences as the build-id
-            # appears to be a hash of the output products
-            # (ie. identical for identical compiler output):
-            env.LDFLAGS += ['-Wl,--build-id=bob']
+            # Disable setting build ID in the ELF header.
+            # This avoids flagging if two binaries differ in a way we don't care about.
+            # MacOS (darwin) outputs (Mach-O, not ELF) do not need this.
+            if cfg.env.DEST_OS != 'darwin':
+                env.LDFLAGS += ['-Wl,--build-id=none']
             # squash all line numbers to be the number 17
             env.CXXFLAGS += [
                 "-D__AP_LINE__=17",
@@ -596,13 +642,18 @@ class Board:
 
     def build(self, bld):
         git_hash_ext = bld.git_head_hash(short=True, hash_abbrev=16)
-        bld.ap_version_append_str('GIT_VERSION', bld.git_head_hash(short=True))
-        bld.ap_version_append_str('GIT_VERSION_EXTENDED', git_hash_ext)
-        bld.ap_version_append_int('GIT_VERSION_INT', int("0x" + bld.git_head_hash(short=True), base=16))
-        bld.ap_version_append_str('AP_BUILD_ROOT', bld.srcnode.abspath())
-        import time
-        ltime = time.localtime()
+        bld.ap_version_append_str('GIT_VERSION', bld.git_head_hash(short=True), "abcdef")
+        bld.ap_version_append_str('GIT_VERSION_EXTENDED', git_hash_ext, "0123456789abcdef")
+        bld.ap_version_append_int('GIT_VERSION_INT', int("0x" + bld.git_head_hash(short=True), base=16), 15)
+        # this build root is mostly used as a temporary directory by SIM_JSBSim and probably needs to go
+        bld.ap_version_append_str('AP_BUILD_ROOT', bld.srcnode.abspath(), "/tmp")
+
         if bld.env.build_dates:
+            if bld.options.consistent_builds:
+                raise ValueError("can't enable consistent builds and build dates")
+
+            import time
+            ltime = time.localtime()
             bld.ap_version_append_int('BUILD_DATE_YEAR', ltime.tm_year)
             bld.ap_version_append_int('BUILD_DATE_MONTH', ltime.tm_mon)
             bld.ap_version_append_int('BUILD_DATE_DAY', ltime.tm_mday)
@@ -630,7 +681,15 @@ def add_dynamic_boards_chibios():
 
 def add_dynamic_boards_linux():
     '''add boards based on existence of hwdef.dat in subdirectories for '''
-    add_dynamic_boards_from_hwdef_dir(linux, 'libraries/AP_HAL_Linux/hwdef')
+    add_dynamic_boards_from_hwdef_dir(LinuxBoard, 'libraries/AP_HAL_Linux/hwdef')
+
+def add_dynamic_boards_qurt():
+    '''add boards based on existence of hwdef.dat in subdirectories for '''
+    add_dynamic_boards_from_hwdef_dir(QURTBoard, 'libraries/AP_HAL_QURT/hwdef')
+
+def add_dynamic_boards_sitl():
+    '''add boards based on existence of hwdef.dat in subdirectories for '''
+    add_dynamic_boards_from_hwdef_dir(SITLBoard, 'libraries/AP_HAL_SITL/hwdef')
 
 def add_dynamic_boards_from_hwdef_dir(base_type, hwdef_dir):
     '''add boards based on existence of hwdef.dat in subdirectory'''
@@ -675,6 +734,8 @@ def get_boards_names():
     add_dynamic_boards_esp32()
     add_dynamic_boards_zephyr()
     add_dynamic_boards_linux()
+    add_dynamic_boards_qurt()
+    add_dynamic_boards_sitl()
 
     return sorted(list(_board_classes.keys()), key=str.lower)
 
@@ -733,7 +794,8 @@ Please use a replacement build as follows:
 # identify opportunities to simplify common flags. In the future might
 # be worthy to keep board definitions in files of their own.
 
-class sitl(Board):
+class SITLBoard(Board):
+    abstract = True
 
     def __init__(self):
         super().__init__()
@@ -741,8 +803,22 @@ class sitl(Board):
         self.with_can = True
         self.with_littlefs = True
 
+    def configure(self, cfg):
+        if hasattr(self, 'hwdef'):
+            cfg.env.HWDEF = self.hwdef
+
+        # load hwdef, extract toolchain from cfg.env:
+        cfg.load('sitl')
+        if cfg.env.TOOLCHAIN:
+            self.toolchain = cfg.env.TOOLCHAIN
+        else:
+            # default tool-chain for SITL-based boards:
+            self.toolchain = 'native'
+
+        super().configure(cfg)
+
     def configure_env(self, cfg, env):
-        super(sitl, self).configure_env(cfg, env)
+        super().configure_env(cfg, env)
         env.DEFINES.update(
             CONFIG_HAL_BOARD = 'HAL_BOARD_SITL',
             CONFIG_HAL_BOARD_SUBTYPE = 'HAL_BOARD_SUBTYPE_NONE',
@@ -761,17 +837,12 @@ class sitl(Board):
         cfg.define('AP_NOTIFY_LP5562_BUS', 2)
         cfg.define('AP_NOTIFY_LP5562_ADDR', 0x30)
 
-        # turn on fencepoint and rallypoint protocols so they're still tested:
-        env.CXXFLAGS.extend([
-            '-DAP_MAVLINK_RALLY_POINT_PROTOCOL_ENABLED=HAL_GCS_ENABLED&&HAL_RALLY_ENABLED',
-            '-DAC_POLYFENCE_FENCE_POINT_PROTOCOL_SUPPORT=HAL_GCS_ENABLED&&AP_FENCE_ENABLED'
-        ])
-
-        try:
-            env.CXXFLAGS.remove('-DHAL_NAVEKF2_AVAILABLE=0')
-        except ValueError:
-            pass
-        env.CXXFLAGS += ['-DHAL_NAVEKF2_AVAILABLE=1']
+        if not cfg.env.AP_PERIPH:
+            try:
+                env.CXXFLAGS.remove('-DHAL_NAVEKF2_AVAILABLE=0')
+            except ValueError:
+                pass
+            env.CXXFLAGS += ['-DHAL_NAVEKF2_AVAILABLE=1']
 
         if self.with_can:
             cfg.define('HAL_NUM_CAN_IFACES', 2)
@@ -818,7 +889,9 @@ class sitl(Board):
                 '-O3',
             ]
 
-        if 'clang++' in cfg.env.COMPILER_CXX and cfg.options.asan:
+        if cfg.options.asan:
+            if not cfg.env.DEBUG:
+                cfg.fatal('--asan requires --debug for reliable instrumentation')
             env.CXXFLAGS += [
                 '-fsanitize=address',
                 '-fno-omit-frame-pointer',
@@ -833,8 +906,8 @@ class sitl(Board):
 
         env.LINKFLAGS += ['-pthread',]
 
-        if cfg.env.DEBUG and 'clang++' in cfg.env.COMPILER_CXX and cfg.options.asan:
-             env.LINKFLAGS += ['-fsanitize=address']
+        if 'clang++' in cfg.env.COMPILER_CXX and cfg.options.asan:
+            env.LINKFLAGS += ['-fsanitize=address']
 
         env.AP_LIBRARIES += [
             'AP_HAL_SITL',
@@ -867,11 +940,23 @@ class sitl(Board):
                     env.ROMFS_FILES += [(f,'libraries/AP_OSD/fonts/'+f)]
 
         for f in os.listdir('Tools/autotest/models'):
+            if fnmatch.fnmatch(f, "*.param"):
+                cfg.fatal("Tools/autotest/models/%s uses .param extension; rename to .parm so it is embedded in ROMFS" % f)
             if fnmatch.fnmatch(f, "*.json") or fnmatch.fnmatch(f, "*.parm"):
                 env.ROMFS_FILES += [('models/'+f,'Tools/autotest/models/'+f)]
 
         # include locations.txt so SITL on windows can lookup by name
         env.ROMFS_FILES += [('locations.txt','Tools/autotest/locations.txt')]
+
+        # embed vehicleinfo.json and the default-params files so SITL is
+        # self-sufficient: a binary invoked with --model=<frame> can resolve
+        # its parameter defaults from ROMFS without the source tree on disk.
+        env.ROMFS_FILES += [('vehicleinfo.json','Tools/autotest/pysim/vehicleinfo.json')]
+        for f in os.listdir('Tools/autotest/default_params'):
+            if fnmatch.fnmatch(f, "*.param"):
+                cfg.fatal("Tools/autotest/default_params/%s uses .param extension; rename to .parm so it is embedded in ROMFS" % f)
+            if fnmatch.fnmatch(f, "*.parm"):
+                env.ROMFS_FILES += [('default_params/'+f,'Tools/autotest/default_params/'+f)]
 
         if cfg.options.sitl_rgbled:
             env.CXXFLAGS += ['-DWITH_SITL_RGBLED']
@@ -942,178 +1027,14 @@ class sitl(Board):
     def get_name(self):
         return self.__class__.__name__
 
-
-class sitl_periph(sitl):
-    def configure_env(self, cfg, env):
-        cfg.env.AP_PERIPH = 1
-        super(sitl_periph, self).configure_env(cfg, env)
-        env.DEFINES.update(
-            HAL_BUILD_AP_PERIPH = 1,
-            PERIPH_FW = 1,
-            HAL_RAM_RESERVE_START = 0,
-
-            CANARD_ENABLE_CANFD = 1,
-            CANARD_ENABLE_TAO_OPTION = 1,
-            CANARD_MULTI_IFACE = 1,
-
-            # FIXME: SITL library should not be using AP_AHRS:
-            AP_AHRS_ENABLED = 1,
-            AP_AHRS_BACKEND_DEFAULT_ENABLED = 0,
-            AP_AHRS_DCM_ENABLED = 1,  # need a default backend
-            AP_EXTERNAL_AHRS_ENABLED = 0,
-
-            HAL_MAVLINK_BINDINGS_ENABLED = 1,
-
-            AP_AIRSPEED_AUTOCAL_ENABLE = 0,
-            AP_CAN_SLCAN_ENABLED = 0,
-            AP_ICENGINE_ENABLED = 0,
-            AP_MISSION_ENABLED = 0,
-            AP_RCPROTOCOL_ENABLED = 0,
-            AP_RTC_ENABLED = 0,
-            AP_SCHEDULER_ENABLED = 0,
-            AP_SCRIPTING_ENABLED = 0,
-            AP_STATS_ENABLED = 0,
-            AP_UART_MONITOR_ENABLED = 1,
-            COMPASS_CAL_ENABLED = 0,
-            COMPASS_LEARN_ENABLED = 0,
-            COMPASS_MOT_ENABLED = 0,
-            HAL_CAN_DEFAULT_NODE_ID = 0,
-            HAL_CANMANAGER_ENABLED = 0,
-            HAL_GCS_ENABLED = 0,
-            HAL_GENERATOR_ENABLED = 0,
-            HAL_LOGGING_ENABLED = 0,
-            HAL_LOGGING_MAVLINK_ENABLED = 0,
-            HAL_PROXIMITY_ENABLED = 0,
-            HAL_RALLY_ENABLED = 0,
-            HAL_SUPPORT_RCOUT_SERIAL = 0,
-            AP_TERRAIN_AVAILABLE = 0,
-            AP_CUSTOMROTATIONS_ENABLED = 0,
-            AP_PERIPH_BATTERY_ENABLED = 0,
-            AP_PERIPH_DEVICE_TEMPERATURE_ENABLED = 0,
-            AP_PERIPH_SERIAL_OPTIONS_ENABLED = 0,
-            AP_PERIPH_ADSB_ENABLED = 0,
-            AP_PERIPH_PROXIMITY_ENABLED = 0,
-            AP_PERIPH_GPS_ENABLED = 0,
-            AP_PERIPH_RELAY_ENABLED = 0,
-            AP_PERIPH_IMU_ENABLED = 0,
-            AP_PERIPH_MAG_ENABLED = 0,
-            AP_PERIPH_BATTERY_BALANCE_ENABLED = 0,
-            AP_PERIPH_BATTERY_TAG_ENABLED = 0,
-            AP_PERIPH_MSP_ENABLED = 0,
-            AP_PERIPH_BARO_ENABLED = 0,
-            AP_PERIPH_EFI_ENABLED = 0,
-            AP_PERIPH_RANGEFINDER_ENABLED = 0,
-            AP_PERIPH_RC_OUT_ENABLED = 0,
-            AP_PERIPH_RTC_ENABLED = 0,
-            AP_PERIPH_RCIN_ENABLED = 0,
-            AP_PERIPH_RPM_ENABLED = 0,
-            AP_PERIPH_RPM_STREAM_ENABLED = 0,
-            AP_PERIPH_AIRSPEED_ENABLED = 0,
-            AP_PERIPH_HOBBYWING_ESC_ENABLED = 0,
-            AP_PERIPH_NETWORKING_ENABLED = 0,
-            AP_PERIPH_NOTIFY_ENABLED = 0,
-            AP_PERIPH_PWM_HARDPOINT_ENABLED = 0,
-            AP_PERIPH_ESC_APD_ENABLED = 0,
-            AP_PERIPH_NCP5623_LED_WITHOUT_NOTIFY_ENABLED = 0,
-            AP_PERIPH_NCP5623_BGR_LED_WITHOUT_NOTIFY_ENABLED = 0,
-            AP_PERIPH_TOSHIBA_LED_WITHOUT_NOTIFY_ENABLED = 0,
-            AP_PERIPH_BUZZER_ENABLED = 0,
-            AP_PERIPH_BUZZER_WITHOUT_NOTIFY_ENABLED = 0,
-            AP_PERIPH_RTC_GLOBALTIME_ENABLED = 0,
-        )
-
-        try:
-            env.CXXFLAGS.remove('-DHAL_NAVEKF2_AVAILABLE=1')
-        except ValueError:
-            pass
-        env.CXXFLAGS += ['-DHAL_NAVEKF2_AVAILABLE=0']
-
-class sitl_periph_universal(sitl_periph):
-    def configure_env(self, cfg, env):
-        super(sitl_periph_universal, self).configure_env(cfg, env)
-        env.DEFINES.update(
-            CAN_APP_NODE_NAME = '"org.ardupilot.ap_periph_universal"',
-            APJ_BOARD_ID = 100,
-
-            AP_PERIPH_GPS_ENABLED = 1,
-            AP_PERIPH_AIRSPEED_ENABLED = 1,
-            AP_PERIPH_MAG_ENABLED = 1,
-            AP_PERIPH_BARO_ENABLED = 1,
-            AP_PERIPH_IMU_ENABLED = 1,
-            AP_PERIPH_RANGEFINDER_ENABLED = 1,
-            AP_PERIPH_BATTERY_ENABLED = 1,
-            AP_PERIPH_EFI_ENABLED = 1,
-            AP_PERIPH_RPM_ENABLED = 1,
-            AP_PERIPH_RPM_STREAM_ENABLED = 1,
-            AP_RPM_STREAM_ENABLED = 1,
-            AP_PERIPH_RC_OUT_ENABLED = 1,
-            AP_PERIPH_ADSB_ENABLED = 1,
-            AP_PERIPH_SERIAL_OPTIONS_ENABLED = 1,
-            AP_AIRSPEED_ENABLED = 1,
-            AP_BATTERY_ESC_ENABLED = 1,
-            HAL_PWM_COUNT = 32,
-            HAL_WITH_ESC_TELEM = 1,
-            AP_EXTENDED_ESC_TELEM_ENABLED = 1,
-            AP_TERRAIN_AVAILABLE = 1,
-            HAL_GYROFFT_ENABLED = 0,
-        )
-
-class sitl_periph_gps(sitl_periph):
-    def configure_env(self, cfg, env):
-        cfg.env.AP_PERIPH = 1
-        super(sitl_periph_gps, self).configure_env(cfg, env)
-        env.DEFINES.update(
-            HAL_BUILD_AP_PERIPH = 1,
-            PERIPH_FW = 1,
-            CAN_APP_NODE_NAME = '"org.ardupilot.ap_periph_gps"',
-            APJ_BOARD_ID = 101,
-
-            AP_PERIPH_GPS_ENABLED = 1,
-        )
-
-class sitl_periph_battmon(sitl_periph):
-    def configure_env(self, cfg, env):
-        cfg.env.AP_PERIPH = 1
-        super(sitl_periph_battmon, self).configure_env(cfg, env)
-        env.DEFINES.update(
-            HAL_BUILD_AP_PERIPH = 1,
-            PERIPH_FW = 1,
-            CAN_APP_NODE_NAME = '"org.ardupilot.ap_periph_battmon"',
-            APJ_BOARD_ID = 101,
-
-            AP_PERIPH_BATTERY_ENABLED = 1,
-        )
-
-class sitl_periph_battery_tag(sitl_periph):
-    def configure_env(self, cfg, env):
-        cfg.env.AP_PERIPH = 1
-        super(sitl_periph_battery_tag, self).configure_env(cfg, env)
-        env.DEFINES.update(
-            HAL_BUILD_AP_PERIPH = 1,
-            PERIPH_FW = 1,
-            CAN_APP_NODE_NAME = '"org.ardupilot.battery_tag"',
-            APJ_BOARD_ID = 101,
-
-            AP_SIM_PARAM_ENABLED = 0,
-            AP_KDECAN_ENABLED = 0,
-            AP_TEMPERATURE_SENSOR_ENABLED = 0,
-            AP_PERIPH_BATTERY_TAG_ENABLED = 1,
-            AP_RTC_ENABLED = 1,
-            AP_PERIPH_RTC_ENABLED = 1,
-            AP_PERIPH_RTC_GLOBALTIME_ENABLED = 1,
-        )
-
-class sitl_periph_can_to_serial(sitl_periph):
-    def configure_env(self, cfg, env):
-        cfg.env.AP_PERIPH = 1
-        super().configure_env(cfg, env)
-        env.DEFINES.update(
-            HAL_BUILD_AP_PERIPH = 1,
-            PERIPH_FW = 1,
-            CAN_APP_NODE_NAME = '"org.ardupilot.serial_passthrough"',
-            APJ_BOARD_ID = 101,
-
-        )
+    def pre_build(self, bld):
+        '''pre-build hook that gets called before dynamic sources'''
+        from waflib.Context import load_tool
+        module = load_tool('sitl', [], with_sys_path=True)
+        fun = getattr(module, 'pre_build', None)
+        if fun:
+            fun(bld)
+        super().pre_build(bld)
 
 class esp32(Board):
     abstract = True
@@ -1148,7 +1069,7 @@ class esp32(Board):
 
         # this makes sure we get the correct subtype
         env.DEFINES.update(
-            CONFIG_HAL_BOARD_SUBTYPE = 'HAL_BOARD_SUBTYPE_ESP32_%s' %  tt.upper() ,
+            CONFIG_HAL_BOARD_SUBTYPE = 'HAL_BOARD_SUBTYPE_NONE',
         )
 
         if self.name.endswith("empty"):
@@ -1203,9 +1124,6 @@ class esp32(Board):
                 HAL_PARAM_DEFAULTS_PATH='"@ROMFS/defaults.parm"',
             )
 
-        env.INCLUDES += [
-                cfg.srcnode.find_dir('libraries/AP_HAL_ESP32/boards').abspath(),
-            ]
         env.AP_PROGRAM_AS_STLIB = True
         #if cfg.options.enable_profile:
         #    env.CXXFLAGS += ['-pg',
@@ -1591,7 +1509,7 @@ class chibios(Board):
 
     def build(self, bld):
         super(chibios, self).build(bld)
-        bld.ap_version_append_str('CHIBIOS_GIT_VERSION', bld.git_submodule_head_hash('ChibiOS', short=True))
+        bld.ap_version_append_str('CHIBIOS_GIT_VERSION', bld.git_submodule_head_hash('ChibiOS', short=True), "12345678")
         bld.load('chibios')
 
     def pre_build(self, bld):
@@ -1606,14 +1524,14 @@ class chibios(Board):
     def get_name(self):
         return self.name
 
-class linux(Board):
+class LinuxBoard(Board):
+    '''an abstract base class for Linux boards to inherit from'''
+    abstract = True
+
     def __init__(self):
         super().__init__()
 
-        if self.toolchain == 'native':
-            self.with_can = True
-        else:
-            self.with_can = False
+        self.with_can = True
 
     def configure(self, cfg):
         if hasattr(self, 'hwdef'):
@@ -1623,8 +1541,6 @@ class linux(Board):
         cfg.load('linux')
         if cfg.env.TOOLCHAIN:
             self.toolchain = cfg.env.TOOLCHAIN
-        elif cfg.options.board == 'linux':
-            pass  # set in __init__
         else:
             # default tool-chain for Linux-based boards:
             self.toolchain = 'arm-linux-gnueabihf'
@@ -1633,13 +1549,10 @@ class linux(Board):
         if cfg.env.WITH_CAN:
             self.with_can = True
 
-        super(linux, self).configure(cfg)
+        super().configure(cfg)
 
     def configure_env(self, cfg, env):
-
-        if cfg.options.board == 'linux':
-            self.with_can = True
-        super(linux, self).configure_env(cfg, env)
+        super().configure_env(cfg, env)
 
         env.BOARD_CLASS = "LINUX"
 
@@ -1688,12 +1601,7 @@ class linux(Board):
             env.DEFINES.update(
                 HAL_FORCE_32BIT = 0,
             )
-        if self.with_can and cfg.options.board == 'linux':
-            cfg.env.HAL_NUM_CAN_IFACES = 2
-            cfg.define('HAL_NUM_CAN_IFACES', 2)
-            cfg.define('HAL_CANFD_SUPPORTED', 1)
-            cfg.define('CANARD_ENABLE_CANFD', 1)
-        
+
         if self.with_can:
             env.DEFINES.update(CANARD_MULTI_IFACE=1,
                                CANARD_IFACE_ALL = 0x3)
@@ -1715,10 +1623,10 @@ class linux(Board):
         fun = getattr(module, 'pre_build', None)
         if fun:
             fun(bld)
-        super(linux, self).pre_build(bld)
+        super().pre_build(bld)
 
     def build(self, bld):
-        super(linux, self).build(bld)
+        super().build(bld)
         bld.load('linux')
         if bld.options.upload:
             waflib.Options.commands.append('rsync')
@@ -1729,18 +1637,7 @@ class linux(Board):
         # get name of class
         return self.__class__.__name__
 
-class SITL_static(sitl):
-    def configure_env(self, cfg, env):
-        super(SITL_static, self).configure_env(cfg, env)
-        cfg.env.STATIC_LINKING = True
-
-class SITL_x86_64_linux_gnu(SITL_static):
-    toolchain = 'x86_64-linux-gnu'
-
-class SITL_arm_linux_gnueabihf(SITL_static):
-    toolchain = 'arm-linux-gnueabihf'
-
-class QURT(Board):
+class QURTBoard(Board):
     '''support for QURT based boards'''
     toolchain = 'custom'
 
@@ -1748,6 +1645,11 @@ class QURT(Board):
         super().__init__()
 
         self.with_can = False
+
+    def configure(self, cfg):
+        # load hwdef, extract toolchain from cfg.env:
+        cfg.load('qurt')
+        super().configure(cfg)
 
     def configure_toolchain(self, cfg):
         cfg.env.CXX_NAME = 'gcc'
@@ -1783,7 +1685,7 @@ class QURT(Board):
         ]
 
     def configure_env(self, cfg, env):
-        super(QURT, self).configure_env(cfg, env)
+        super().configure_env(cfg, env)
 
         env.BOARD_CLASS = "QURT"
         env.HEXAGON_APP = "libardupilot.so"
@@ -1829,7 +1731,7 @@ class QURT(Board):
         ]
 
     def build(self, bld):
-        super(QURT, self).build(bld)
+        super().build(bld)
         bld.load('qurt')
 
     def get_name(self):

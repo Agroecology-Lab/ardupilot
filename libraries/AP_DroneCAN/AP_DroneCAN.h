@@ -55,7 +55,7 @@
 
 
 #ifndef AP_DRONECAN_HOBBYWING_ESC_SUPPORT
-#define AP_DRONECAN_HOBBYWING_ESC_SUPPORT (HAL_PROGRAM_SIZE_LIMIT_KB>1024)
+#define AP_DRONECAN_HOBBYWING_ESC_SUPPORT (HAL_PROGRAM_SIZE_LIMIT_KB>1024 && HAL_WITH_ESC_TELEM)
 #endif
 
 #ifndef AP_DRONECAN_HIMARK_SERVO_SUPPORT
@@ -90,7 +90,7 @@ public:
     static AP_DroneCAN *get_dronecan(uint8_t driver_index);
     bool prearm_check(char* fail_msg, uint8_t fail_msg_len) const;
 
-    __INITFUNC__ void init(uint8_t driver_index, bool enable_filters) override;
+    __INITFUNC__ void init(uint8_t driver_index) override;
     bool add_interface(AP_HAL::CANIface* can_iface) override;
 
     // add an 11 bit auxillary driver
