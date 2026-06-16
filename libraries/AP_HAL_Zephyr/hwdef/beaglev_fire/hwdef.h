@@ -28,8 +28,9 @@
                 ROTATION_NONE))
 
 #define HAL_BARO_PROBE_LIST \
-    ADD_BACKEND(AP_Baro_BMP280::probe(*this, \
-                std::move(hal.i2c_mgr->get_device(0, 0x76, 100000))))
+    { probe_dev(AP_Baro_BMP280::probe, \
+                hal.i2c_mgr->get_device_ptr(0, 0x76, 100000)); \
+      RETURN_IF_NO_SPACE; }
 
 #endif
 
@@ -164,10 +165,11 @@
 // not 0x68 (MPU addr). 100 kHz forces STANDARD mode for the compass; the
 // MPU-9250 bypass has timing issues at our 293 kHz FAST rate.
 #define HAL_MAG_PROBE_LIST \
-    ADD_BACKEND(DRIVER_AK8963, \
-                AP_Compass_AK8963::probe_mpu9250( \
-                    hal.i2c_mgr->get_device(0, 0x0c, 100000), \
-                    ROTATION_NONE))
+    { add_backend(DRIVER_AK8963, \
+                  AP_Compass_AK8963::probe_mpu9250( \
+                      hal.i2c_mgr->get_device(0, 0x0c, 100000), \
+                      ROTATION_NONE)); \
+      RETURN_IF_NO_SPACE; }
 
 #ifndef AP_FILESYSTEM_POSIX_ENABLED
 #define AP_FILESYSTEM_POSIX_ENABLED 1

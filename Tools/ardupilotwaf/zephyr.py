@@ -32,13 +32,12 @@ from collections import OrderedDict
 from waflib import Task
 from waflib.TaskGen import before_method, after_method, feature
 
-import hal_common
-
 
 @feature('zephyr_ap_library', 'zephyr_ap_program')
 @before_method('process_source')
 def zephyr_dynamic_env(self):
-    hal_common.common_dynamic_env(self)
+    if self.bld.cmd == 'list':
+        return
 
 
 def configure(cfg):
