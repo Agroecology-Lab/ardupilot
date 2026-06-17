@@ -10,7 +10,6 @@
 
 	aliases {
 		ardupilot-serial0 = &uart2;
-		ardupilot-serial3 = &uart3;
 		ardupilot-serial4 = &uart4;
 
 		ardupilot-gpio0 = &gpio0;
@@ -27,9 +26,7 @@
 
 		sdhc0 = &sdhc_spi;
 
-		/* To enable SBUS RC input: drop one serial alias and add
-		 * ardupilot-rcinput = &uart3;  (or whichever UART is free).
-		 * The SBUS signal may need hardware inversion. */
+		ardupilot-rcinput = &uart3;
 	};
 
 	/* ROBOTICS cape fabric servo PWM, 8 ch in the FIC3 AXI window. */

@@ -23,11 +23,17 @@ public:
     void _timer_tick();
 
 private:
-    static constexpr uint32_t SBUS_BAUD = 100000u;
+    // Apply serial framing RC_CONFIGS[idx] to the UART and re-arm RX.
+    void _apply_config(uint8_t idx);
 
     // resolved from ardupilot-rcinput DT alias; null if absent
     const struct device *_dev;
     bool                 _has_uart;
+    uint8_t           _cfg_idx;
+    uint32_t          _last_cfg_change_ms;
+    uint32_t          _last_input_ms;
+    bool              _detected;
+    volatile uint32_t _current_baud;  // baud hint handed to process_byte()
 
     static constexpr uint8_t MAX_CH = 18u;
     uint16_t      _values[MAX_CH];
